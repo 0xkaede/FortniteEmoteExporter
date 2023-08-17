@@ -6,7 +6,7 @@ This sofware allows you to export emotes from latest fortnite by using there EID
 - Please feel free to contrubute to this if you can fix the errors your self
 
 ### What does it export?
-- Animations (Addicive Fix)
+- Animations (Additive Fix)
 - Animations in .Json for Json As Asset
 - Icons
 - Monagtage in .Json
