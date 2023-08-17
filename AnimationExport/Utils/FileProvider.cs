@@ -30,6 +30,8 @@ using CUE4Parse_Conversion.Sounds;
 using CUE4Parse.UE4.Objects.Core.i18N;
 using CUE4Parse.UE4.Objects.Engine.Animation;
 using CUE4Parse.UE4.Assets.Exports.Material;
+using FFMpegCore;
+using FFMpegCore.Pipes;
 
 namespace AnimationExport.Utils
 {
@@ -284,6 +286,15 @@ namespace AnimationExport.Utils
                                 Directory.CreateDirectory(MiscPath());
                                 await File.WriteAllBytesAsync($"{MiscPath()}\\{musicBoom.Name}.ogg", data);
 
+                                var audioInputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}.ogg", FileMode.Open);
+                                await using var audioOutputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}_FIXED.wav", FileMode.OpenOrCreate);
+
+                                FFMpegArguments
+                                    .FromPipeInput(new StreamPipeSource(audioInputStream))
+                                    .OutputToPipe(new StreamPipeSink(audioOutputStream), options =>
+                                        options.ForceFormat("wav"))
+                                    .ProcessSynchronously();
+
                                 Logger.Log($"Exported {musicBoom.Name}", LogLevel.Cue4);
                             }
                             catch (Exception ex)
@@ -298,6 +309,15 @@ namespace AnimationExport.Utils
                                 Directory.CreateDirectory(MiscPath());
                                 await File.WriteAllBytesAsync($"{MiscPath()}\\{musicBoom.Name}.ogg", data);
 
+                                var audioInputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}.ogg", FileMode.Open);
+                                await using var audioOutputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}_FIXED.wav", FileMode.OpenOrCreate);
+
+                                FFMpegArguments
+                                    .FromPipeInput(new StreamPipeSource(audioInputStream))
+                                    .OutputToPipe(new StreamPipeSink(audioOutputStream), options =>
+                                        options.ForceFormat("wav"))
+                                    .ProcessSynchronously();
+
                                 Logger.Log($"Exported {musicBoom.Name}", LogLevel.Cue4);
                             }
                         }
@@ -305,7 +325,6 @@ namespace AnimationExport.Utils
                             Logger.Log("Error Getting UEmoteMusic", LogLevel.Error);
                     }
                 }
-                
             }
             else
                 Logger.Log("Error Getting FAnimNotifyEvent", LogLevel.Error);
