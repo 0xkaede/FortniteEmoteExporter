@@ -32,6 +32,7 @@ using CUE4Parse.UE4.Objects.Engine.Animation;
 using CUE4Parse.UE4.Assets.Exports.Material;
 using FFMpegCore;
 using FFMpegCore.Pipes;
+using CUE4Parse.UE4.Assets.Exports.Rig;
 
 namespace AnimationExport.Utils
 {
@@ -86,13 +87,14 @@ namespace AnimationExport.Utils
             return new FileUsmapTypeMappingsProvider(latestUsmapInfo.FullName);
         }
 
+        private static EmoteData exportDataJson = new EmoteData();
+
         public static async Task Export(string EID)
         {
-            var exportDataJson = new EmoteData();
-            var exporterOptions = new ExporterOptions();
+            
             CurrentId = EID;
 
-            #region EID
+            #region Ready
             UObject eidObj;
             try
             {
@@ -110,9 +112,6 @@ namespace AnimationExport.Utils
                     return;
                 }
             }
-
-            var femaleAnimation = string.Empty;
-            var maleAnimation = string.Empty;
 
             if(!eidObj.TryGetValue(out UObject CMM_Montage, "Animation"))
             {
@@ -137,203 +136,155 @@ namespace AnimationExport.Utils
 
             #endregion
 
-            #region Male
-            Logger.Log("Exporting Male Anims", LogLevel.Cue4);
-
+            #region Stop
+            Logger.Log("Exporting Male Animations", LogLevel.Cue4);
             var CMMObject = await Provider.LoadObjectAsync(CMM_Montage.GetPathName());
-            var maleAnimPath = string.Empty;
+            await ExportAnimations(CMMObject);
 
-            if(CMMObject.TryGetValue(out FSlotAnimationTrack[] slotTracksMale, "SlotAnimTracks"))
+            Logger.Log("Exporting Female Animations", LogLevel.Cue4);
+            var CMFObject = await Provider.LoadObjectAsync(CMF_Montage.GetPathName());
+            await ExportAnimations(CMFObject, EGender.Female);
+
+            await ExportIcons(eidObj);
+
+            Logger.Log("Exporting Audio", LogLevel.Cue4);
+            await ExportAudio(CMMObject);
+
+            await JsonEmoteDataSave(exportDataJson);
+            await JsonDataSave(JsonConvert.SerializeObject(CMMObject, Formatting.Indented));
+            #endregion
+        }
+
+        private static async Task ExportAnimations(UObject uObject, EGender gender = EGender.Male)
+        {
+            bool isAdictive = false;
+
+            if (uObject.TryGetValue(out FSlotAnimationTrack[] slotAnimTracks, "SlotAnimTracks"))
             {
-                var nameeee = slotTracksMale[0].SlotName;
+                if(gender is EGender.Female)
+                    isAdictive = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText == "AdditiveCorrective") is null ? false : true;
 
-                var maleFullBody = slotTracksMale.FirstOrDefault(x => x.SlotName.PlainText == "FullBody");
+                exportDataJson.IsAddictive = isAdictive;
 
-                if (maleFullBody == null)
+                var currentSlotName = isAdictive ? "FullBody" : "AdditiveCorrective";
+
+                var fullBodyAnimTrack = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText == "FullBody");
+                
+                if (fullBodyAnimTrack is null)
                 {
-                    Logger.Log("Cant find full body in male montage", LogLevel.Cue4);
-                    Console.Read();
+                    Logger.Log($"Cant find FullBody", LogLevel.Error);
                     return;
                 }
 
-                var maleReference = await maleFullBody.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
-                maleAnimPath = maleReference.GetPathName();
-                var maleAnimSequence = Provider.LoadObject<UAnimSequence>(maleAnimPath);
+                var animReference = await fullBodyAnimTrack.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
 
-                var maleexporter = new AnimExporter(maleAnimSequence, exporterOptions);
-                maleexporter.TryWriteToDir(new DirectoryInfo(Constants.ExportPath), out var maleLabel, out var maleFileName);
-
-                Logger.Log($"Exported {Path.GetFileNameWithoutExtension(maleFileName)}", LogLevel.Cue4);
-
-                if (!Directory.Exists(AnimationsPath()))
-                    Directory.CreateDirectory(AnimationsPath());
-
-                maleFileName.MoveAnimations();
-
-                var maleListJson = new List<UAnimSequence>();
-                maleListJson.Add(maleAnimSequence);
-
-                var maleJson = JsonConvert.SerializeObject(maleListJson, Formatting.Indented);
-                Directory.CreateDirectory($"{JsonPath()}");
-                await File.WriteAllTextAsync(JsonPath() + $"\\{Path.GetFileNameWithoutExtension(maleFileName)}.json", maleJson);
-            }
-            else
-                Logger.Log("Error Getting FSlotAnimationTrack", LogLevel.Error);
-
-            var maleCMMMJson = JsonConvert.SerializeObject(CMMObject, Formatting.Indented);
-
-            #endregion
-
-            #region Female
-            Logger.Log("Exporting Female Anims", LogLevel.Cue4);
-            var CMFObject = await Provider.LoadObjectAsync(CMF_Montage.GetPathName());
-
-            if(CMFObject.TryGetValue(out FSlotAnimationTrack[] SlotTracksFemale, "SlotAnimTracks"))
-            {
-                bool isAddicive = false;
-
-                var addictive = SlotTracksFemale.FirstOrDefault(x => x.SlotName.PlainText == "AdditiveCorrective");
-
-                if (addictive != null)
+                if (isAdictive)
                 {
-                    Logger.Log("isAdditive true");
-                    exportDataJson.IsAddictive = true;
-                    var femaleReference = await addictive.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
-
-                    femaleAnimation = femaleReference.GetPathName();
-                    var addUAnimSequence = Provider.LoadObject<UAnimSequence>(femaleReference.GetPathName());
-                    var refUAnimSequence = Provider.LoadObject<UAnimSequence>(maleAnimPath);
+                    var additiveCorrectiveAnimTrack = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText == "AdditiveCorrective");
+                    var additiveCorrectiveanimReference = await additiveCorrectiveAnimTrack.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
+                    var refUAnimSequence = await Provider.LoadObjectAsync<UAnimSequence>(animReference.GetPathName());
+                    var addUAnimSequence = await Provider.LoadObjectAsync<UAnimSequence>(additiveCorrectiveanimReference.GetPathName());
                     addUAnimSequence.RefPoseSeq = new ResolvedLoadedObject(refUAnimSequence);
-                    var exporter = new AnimExporter(addUAnimSequence, exporterOptions);
-                    exporter.TryWriteToDir(new DirectoryInfo(Constants.ExportPath), out var label, out var fileName);
-                    Logger.Log($"Exported {Path.GetFileNameWithoutExtension(fileName)}", LogLevel.Cue4);
-                    fileName.MoveAnimations();
+                    await ExportAnimations(addUAnimSequence);
                 }
                 else
                 {
-                    Logger.Log("isAdditive false");
-                    exportDataJson.IsAddictive = false;
-
-                    var femaleFullBody = SlotTracksFemale.FirstOrDefault(x => x.SlotName.PlainText == "FullBody");
-                    if (femaleFullBody == null)
-                    {
-                        Logger.Log("Cant find full body in male montage", LogLevel.Error);
-                        Console.Read();
-                        return;
-                    }
-
-                    var femaleReference = await femaleFullBody.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
-
-                    var femaleAnimSequence = Provider.LoadObject<UAnimSequence>(femaleReference.GetPathName());
-                    var femaleexporter = new AnimExporter(femaleAnimSequence, exporterOptions);
-                    femaleexporter.TryWriteToDir(new DirectoryInfo(Constants.ExportPath), out var femaleLabel, out var femaleFileName);
-                    Logger.Log($"Exported {Path.GetFileNameWithoutExtension(femaleFileName)}", LogLevel.Cue4);
-                    femaleFileName.MoveAnimations();
-
-                    var femaleListJson = new List<UAnimSequence>();
-                    femaleListJson.Add(femaleAnimSequence);
-
-                    var femaleJson = JsonConvert.SerializeObject(femaleListJson, Formatting.Indented);
-                    Directory.CreateDirectory($"{JsonPath()}");
-                    await File.WriteAllTextAsync(JsonPath() + $"\\{Path.GetFileNameWithoutExtension(femaleFileName)}.json", femaleJson);
+                    var animSequence = await Provider.LoadObjectAsync<UAnimSequence>(animReference.GetPathName());
+                    await ExportAnimations(animSequence);
                 }
+                
             }
             else
                 Logger.Log("Error Getting FSlotAnimationTrack", LogLevel.Error);
-            #endregion
+        }
 
-            #region Icons
+        private static async Task ExportAnimations(UAnimSequence animSequence)
+        {
+            var animExporter = new AnimExporter(animSequence, new ExporterOptions());
+            animExporter.TryWriteToDir(new DirectoryInfo(Constants.ExportPath), out var label, out var fileName);
 
+            Logger.Log($"Exported {Path.GetFileNameWithoutExtension(fileName)}", LogLevel.Cue4);
+
+            if (!Directory.Exists(AnimationsPath()))
+                Directory.CreateDirectory(AnimationsPath());
+
+            fileName.MoveAnimations();
+
+            Directory.CreateDirectory($"{JsonPath()}");
+            await File.WriteAllTextAsync(JsonPath() + $"\\{Path.GetFileNameWithoutExtension(fileName)}.json",
+                JsonConvert.SerializeObject(new List<UAnimSequence>() { animSequence }, Formatting.Indented));
+        }
+
+        private static async Task ExportIcons(UObject uObject)
+        {
             Logger.Log("Exporting Icons", LogLevel.Cue4);
 
-            eidObj.TryGetValue(out UTexture2D iconSmall, "SmallPreviewImage");
+            if (!uObject.TryGetValue(out UTexture2D iconSmall, "SmallPreviewImage"))
+                Logger.Log("Cant find SmallPreviewImage");
 
             Directory.CreateDirectory(IconsPath());
 
             await File.WriteAllBytesAsync(IconsPath() + $"\\{iconSmall.Name}.png", iconSmall.Decode()!.Encode(SKEncodedImageFormat.Png, 256).ToArray());
 
-            eidObj.TryGetValue(out UTexture2D largeSmall, "LargePreviewImage");
+            if(!uObject.TryGetValue(out UTexture2D largeSmall, "LargePreviewImage"))
+                Logger.Log("Cant find SmallPreviewImage");
 
             await File.WriteAllBytesAsync(IconsPath() + $"\\{largeSmall.Name}.png", largeSmall.Decode()!.Encode(SKEncodedImageFormat.Png, 512).ToArray());
             Logger.Log("Exported Icons", LogLevel.Cue4);
-            #endregion
+        }
 
-            #region Music
-            Logger.Log("Exporting Music", LogLevel.Cue4);
-
-            if(CMMObject.TryGetValue(out FAnimNotifyEvent[] events, "Notifies"))
+        private static async Task ExportAudio(UObject uObject)
+        {
+            if (uObject.TryGetValue(out FAnimNotifyEvent[] events, "Notifies"))
             {
-                foreach(var sound in events)
-                {
-                    if(sound.NotifyName.PlainText.Contains("FortEmoteSound"))
+                foreach (var sound in events)
+                    if (sound.NotifyName.PlainText.Contains("FortEmoteSound"))
                     {
                         var musicClass = await sound.NotifyStateClass.LoadAsync();
 
                         if (musicClass.TryGetValue(out UEmoteMusic emoteSound1P, "EmoteSound1P"))
                         {
-                            try
-                            {
-                                var licenceNode = await emoteSound1P!.FirstNode.LoadAsync<UFortSoundNodeLicensedContentSwitcher>();
+                            var soundRandom = await TryGetSoundRandom(emoteSound1P);
 
-                                var randomNode = await licenceNode!.ChildNodes[1].LoadAsync<USoundNodeRandom>();
+                            var soundNode = await soundRandom.ChildNodes.FirstOrDefault().TryLoadAsync<USoundNodeWavePlayer>();
 
-                                var soundNode2 = await randomNode.ChildNodes.FirstOrDefault().TryLoadAsync<USoundNodeWavePlayer>();
+                            var musicBoom = await soundNode.SoundWave.LoadAsync();
 
-                                var musicBoom = await soundNode2.SoundWave.LoadAsync();
+                            musicBoom.Decode(false, out var audioFormat, out var data);
 
-                                musicBoom.Decode(false, out var audioFormat, out var data);
+                            Directory.CreateDirectory(MiscPath());
+                            await File.WriteAllBytesAsync($"{MiscPath()}\\{musicBoom.Name}.ogg", data);
 
-                                Directory.CreateDirectory(MiscPath());
-                                await File.WriteAllBytesAsync($"{MiscPath()}\\{musicBoom.Name}.ogg", data);
+                            var audioInputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}.ogg", FileMode.Open);
+                            await using var audioOutputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}_FIXED.wav", FileMode.OpenOrCreate);
 
-                                var audioInputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}.ogg", FileMode.Open);
-                                await using var audioOutputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}_FIXED.wav", FileMode.OpenOrCreate);
+                            FFMpegArguments
+                                .FromPipeInput(new StreamPipeSource(audioInputStream))
+                                .OutputToPipe(new StreamPipeSink(audioOutputStream), options =>
+                                    options.ForceFormat("wav"))
+                                .ProcessSynchronously();
 
-                                FFMpegArguments
-                                    .FromPipeInput(new StreamPipeSource(audioInputStream))
-                                    .OutputToPipe(new StreamPipeSink(audioOutputStream), options =>
-                                        options.ForceFormat("wav"))
-                                    .ProcessSynchronously();
-
-                                Logger.Log($"Exported {musicBoom.Name}", LogLevel.Cue4);
-                            }
-                            catch (Exception ex)
-                            {
-                                var firstNode = await emoteSound1P!.FirstNode.LoadAsync<USoundNodeRandom>();
-                                var soundNode = await firstNode.ChildNodes.FirstOrDefault().TryLoadAsync<USoundNodeWavePlayer>(); //might be copy writed
-
-                                var musicBoom = await soundNode.SoundWave.LoadAsync();
-
-                                musicBoom.Decode(false, out var audioFormat, out var data);
-
-                                Directory.CreateDirectory(MiscPath());
-                                await File.WriteAllBytesAsync($"{MiscPath()}\\{musicBoom.Name}.ogg", data);
-
-                                var audioInputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}.ogg", FileMode.Open);
-                                await using var audioOutputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}_FIXED.wav", FileMode.OpenOrCreate);
-
-                                FFMpegArguments
-                                    .FromPipeInput(new StreamPipeSource(audioInputStream))
-                                    .OutputToPipe(new StreamPipeSink(audioOutputStream), options =>
-                                        options.ForceFormat("wav"))
-                                    .ProcessSynchronously();
-
-                                Logger.Log($"Exported {musicBoom.Name}", LogLevel.Cue4);
-                            }
+                            Logger.Log($"Exported {musicBoom.Name}", LogLevel.Cue4);
                         }
                         else
                             Logger.Log("Error Getting UEmoteMusic", LogLevel.Error);
                     }
-                }
             }
             else
                 Logger.Log("Error Getting FAnimNotifyEvent", LogLevel.Error);
-            #endregion
+        }
 
-            await JsonEmoteDataSave(exportDataJson);
-            await JsonDataSave(maleCMMMJson);
-
-            return;
+        private static async Task<USoundNodeRandom> TryGetSoundRandom(UEmoteMusic uEmoteMusic)
+        {
+            try
+            {
+                var data = await uEmoteMusic.FirstNode.LoadAsync<UFortSoundNodeLicensedContentSwitcher>();
+                return await data.ChildNodes[1].LoadAsync<USoundNodeRandom>();
+            }
+            catch
+            {
+                return await uEmoteMusic!.FirstNode.LoadAsync<USoundNodeRandom>();
+            }
         }
     }
 }

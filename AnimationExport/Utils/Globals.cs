@@ -18,7 +18,7 @@ namespace AnimationExport.Utils
         public static string MiscPath() => $"{Constants.ExportPath}\\{CurrentId}\\MiscPath";
         public static async Task JsonEmoteDataSave(EmoteData data) 
             => await File.WriteAllTextAsync($"{Constants.ExportPath}\\{CurrentId}\\MiscPath\\Data.json",
-                JsonConvert.SerializeObject(data));
+                JsonConvert.SerializeObject(data, Formatting.Indented));
 
         public static async Task JsonDataSave(string data)
             => await File.WriteAllTextAsync($"{Constants.ExportPath}\\{CurrentId}\\MiscPath\\Montage.json",
