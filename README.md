@@ -1,22 +1,24 @@
 # Fortnite Emote Exporter
-This sofware allows you to export emotes from latest fortnite by using there EID by using [CUE4Parse](https://github.com/FabianFG/CUE4Parse)
+This software allows you to export emotes from the latest version of Fortnite by inputting their EID using [CUE4Parse](https://github.com/FabianFG/CUE4Parse)
 
 ### Important
-- If you find any errors please send me them on discord
-- Please feel free to contrubute to this if you can fix the errors your self
+- If you find any errors please send me them on Discord
+- Please feel free to contrubute to this if you can fix the errors yourself
 
 ### What does it export?
 - Animations (Additive Fix)
-- Animations in .Json for Json As Asset
+- Animations in .json for Json As Asset
 - Icons
-- Monagtage in .Json
-- Audio Files in .ogg formate and .wav to fix audios
+- Montage in .json
+- Audio Files in .ogg format and .wav to fix audios
+- Curves
+- Blend Times
 - Name
 - Description
 
 ### Features
 - Auto updates mappings
-- Auto updates aes keys
+- Auto updates AES keys
 
 ### Requirements
 Visual Studio or any C# IDE
