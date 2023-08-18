@@ -10,8 +10,8 @@ namespace AnimationExport.Models
     {
         public string Name { get; set; }
         public string Description { get; set; }
-        public Dictionary<string, int> Blend { get; set; }
-        public List<string> FloatCurves { get; set; }
+        public Dictionary<string, double> Blend { get; set; } = new Dictionary<string, double>();
+        public List<string> FloatCurves { get; set; } = new List<string>();
         public bool IsAddictive { get; set; }
     }
 }

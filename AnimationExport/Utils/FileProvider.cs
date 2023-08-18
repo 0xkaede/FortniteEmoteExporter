@@ -150,8 +150,9 @@ namespace AnimationExport.Utils
             Logger.Log("Exporting Audio", LogLevel.Cue4);
             await ExportAudio(CMMObject);
 
-            await JsonEmoteDataSave(exportDataJson);
             await JsonDataSave(JsonConvert.SerializeObject(CMMObject, Formatting.Indented));
+            await GetLastData();
+            await JsonEmoteDataSave(exportDataJson);
             #endregion
         }
 
@@ -285,6 +286,17 @@ namespace AnimationExport.Utils
             {
                 return await uEmoteMusic!.FirstNode.LoadAsync<USoundNodeRandom>();
             }
+        }
+
+        private static async Task GetLastData()
+        {
+            var data = await GetMontageData();
+
+            exportDataJson.Blend.Add("BlendIn", data.Properties.BlendIn.BlendTime);
+            exportDataJson.Blend.Add("BlendOut", data.Properties.BlendOut.BlendTime);
+
+            foreach (var curv in data.Properties.RawCurveData.FloatCurves)
+                exportDataJson.FloatCurves.Add(curv.Name.DisplayName);
         }
     }
 }
