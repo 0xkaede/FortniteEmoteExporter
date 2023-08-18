@@ -10,7 +10,7 @@ This sofware allows you to export emotes from latest fortnite by using there EID
 - Animations in .Json for Json As Asset
 - Icons
 - Monagtage in .Json
-- Audio Files in .ogg formate (convert it to .wav to fix audios)
+- Audio Files in .ogg formate and .wav to fix audios
 - Name
 - Description
 
