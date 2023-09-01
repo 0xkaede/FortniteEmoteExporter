@@ -82,7 +82,7 @@ namespace AnimationExport.Utils
                     Thread.Sleep(500);
             }
 
-            var latestUsmapInfo = new DirectoryInfo(Constants.DataPath).GetFiles("*_oo.usmap").FirstOrDefault();
+            var latestUsmapInfo = new DirectoryInfo(Constants.DataPath).GetFiles("*_oo.usmap").FirstOrDefault(x => x.Name == mappingsData.FileName);
             Logger.Log($"Mappings Pulled from file: {latestUsmapInfo.Name}", LogLevel.Cue4);
             return new FileUsmapTypeMappingsProvider(latestUsmapInfo.FullName);
         }
@@ -91,7 +91,6 @@ namespace AnimationExport.Utils
 
         public static async Task Export(string EID)
         {
-            
             CurrentId = EID;
 
             #region Ready
@@ -131,6 +130,17 @@ namespace AnimationExport.Utils
             if (!eidObj.TryGetValue(out FText description, "Description"))
                 Logger.Log("Error Getting Description", LogLevel.Error);
 
+            if(eidObj.TryGetValue(out bool bMovingEmote, "bMovingEmote"))
+            {
+                exportDataJson.IsMovingEmote = bMovingEmote;
+                
+                if(eidObj.TryGetValue(out bool bMoveForwardOnly, "bMoveForwardOnly"))
+                    exportDataJson.IsMoveForwardOnly = bMoveForwardOnly;
+
+                if(eidObj.TryGetValue(out float walkForwardSpeed, "WalkForwardSpeed"))
+                    exportDataJson.WalkForwardSpeed = walkForwardSpeed;
+            }
+
             exportDataJson.Description = description.Text ?? "FAILED";
             exportDataJson.Name = displayName.Text ?? "FAILED";
 
@@ -144,6 +154,8 @@ namespace AnimationExport.Utils
             Logger.Log("Exporting Female Animations", LogLevel.Cue4);
             var CMFObject = await Provider.LoadObjectAsync(CMF_Montage.GetPathName());
             await ExportAnimations(CMFObject, EGender.Female);
+
+            Directory.CreateDirectory(MiscPath());
 
             await ExportIcons(eidObj);
 
@@ -239,7 +251,7 @@ namespace AnimationExport.Utils
             if (uObject.TryGetValue(out FAnimNotifyEvent[] events, "Notifies"))
             {
                 foreach (var sound in events)
-                    if (sound.NotifyName.PlainText.Contains("FortEmoteSound"))
+                    if (sound.NotifyName.PlainText.Contains("FortEmoteSound") || sound.NotifyName.PlainText.Contains("Fort Anim Notify State Emote Sound"))
                     {
                         var musicClass = await sound.NotifyStateClass.LoadAsync();
 
@@ -254,6 +266,7 @@ namespace AnimationExport.Utils
                             musicBoom.Decode(false, out var audioFormat, out var data);
 
                             Directory.CreateDirectory(MiscPath());
+
                             await File.WriteAllBytesAsync($"{MiscPath()}\\{musicBoom.Name}.ogg", data);
 
                             var audioInputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}.ogg", FileMode.Open);
@@ -270,6 +283,7 @@ namespace AnimationExport.Utils
                         else
                             Logger.Log("Error Getting UEmoteMusic", LogLevel.Error);
                     }
+
             }
             else
                 Logger.Log("Error Getting FAnimNotifyEvent", LogLevel.Error);
@@ -296,7 +310,7 @@ namespace AnimationExport.Utils
             exportDataJson.Blend.Add("BlendOut", data.Properties.BlendOut.BlendTime);
 
             foreach (var curv in data.Properties.RawCurveData.FloatCurves)
-                exportDataJson.FloatCurves.Add(curv.Name.DisplayName);
+                exportDataJson.FloatCurves.Add(curv.CurveName);
         }
     }
 }

@@ -5,7 +5,13 @@
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <PackageIcon>1430693.ico</PackageIcon>
+    <ApplicationIcon>1430693.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="1430693.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="FFMpegCore" Version="5.1.0" />
@@ -21,6 +27,13 @@
     <Reference Include="Alvas.Audio">
       <HintPath>..\..\..\..\Desktop\Alvas.Audio.dll</HintPath>
     </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="1430693.ico">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
   </ItemGroup>
 
 </Project>

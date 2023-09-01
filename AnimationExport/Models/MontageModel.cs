@@ -31,7 +31,7 @@ namespace AnimationExport.Models
 
     public class FloatCurves
     {
-        public DataName Name { get; set; }
+        public string CurveName { get; set; }
     }
 
     public class DataName

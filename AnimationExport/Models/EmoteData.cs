@@ -13,5 +13,8 @@ namespace AnimationExport.Models
         public Dictionary<string, double> Blend { get; set; } = new Dictionary<string, double>();
         public List<string> FloatCurves { get; set; } = new List<string>();
         public bool IsAddictive { get; set; }
+        public bool IsMovingEmote { get; set; } = false;
+        public bool IsMoveForwardOnly { get; set; } = false;
+        public float WalkForwardSpeed { get; set; } = 0;
     }
 }
