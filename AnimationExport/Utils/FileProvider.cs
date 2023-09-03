@@ -206,6 +206,16 @@ namespace AnimationExport.Utils
                     await ExportAnimations(animSequence);
                 }
                 
+                if(exportDataJson.IsMovingEmote)
+                {
+                    var bodyMotion = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText is "FullBodyInMotion");
+                    if(bodyMotion != null)
+                    {
+                        var animReferenceMot = await bodyMotion.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
+                        var animSequence = await Provider.LoadObjectAsync<UAnimSequence>(animReferenceMot.GetPathName());
+                        await ExportAnimations(animSequence);
+                    }
+                }
             }
             else
                 Logger.Log("Error Getting FSlotAnimationTrack", LogLevel.Error);
