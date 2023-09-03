@@ -13,6 +13,7 @@ This software allows you to export emotes from the latest version of Fortnite by
 - Audio Files in .ogg format and .wav to fix audios
 - Curves
 - Blend Times
+- Is Moving Emote
 - Name
 - Description
 
