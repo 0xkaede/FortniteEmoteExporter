@@ -1,5 +1,4 @@
-﻿using System;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets;
@@ -29,7 +28,7 @@ namespace CUE4Parse.UE4.Objects.UObject
                 throw new ParserException(Ar, $"Asset path \"{path}\" is in short form and is not supported, nor recommended");
             }
 
-            AssetPathName = Ar.Ver >= EUnrealEngineObjectUE5Version.FSOFTOBJECTPATH_REMOVE_ASSET_PATH_FNAMES ? new FName(new FTopLevelAssetPath(Ar).ToString()) : Ar.ReadFName();
+            AssetPathName = Ar.Ver >= EUnrealEngineObjectUE5Version.FSOFTOBJECTPATH_REMOVE_ASSET_PATH_FNAMES || Ar.Game == EGame.GAME_TheFirstDescendant ? new FName(new FTopLevelAssetPath(Ar).ToString()) : Ar.ReadFName();
             SubPathString = Ar.ReadFString();
             Owner = Ar.Owner;
         }
@@ -50,7 +49,7 @@ namespace CUE4Parse.UE4.Objects.UObject
         public bool TryLoad(out UExport export)
         {
             var provider = Owner?.Provider;
-            if (provider == null)
+            if (provider == null || AssetPathName.IsNone || string.IsNullOrEmpty(AssetPathName.Text))
             {
                 export = default;
                 return false;
@@ -66,7 +65,7 @@ namespace CUE4Parse.UE4.Objects.UObject
         public bool TryLoad<T>(out T export) where T : UExport
         {
             var provider = Owner?.Provider;
-            if (provider == null)
+            if (provider == null || AssetPathName.IsNone || string.IsNullOrEmpty(AssetPathName.Text))
             {
                 export = default;
                 return false;
@@ -81,7 +80,7 @@ namespace CUE4Parse.UE4.Objects.UObject
         public async Task<UExport?> TryLoadAsync()
         {
             var provider = Owner?.Provider;
-            if (provider == null) return null;
+            if (provider == null || AssetPathName.IsNone || string.IsNullOrEmpty(AssetPathName.Text)) return null;
             return await TryLoadAsync(provider).ConfigureAwait(false);
         }
 
@@ -92,7 +91,7 @@ namespace CUE4Parse.UE4.Objects.UObject
         public async Task<T?> TryLoadAsync<T>() where T : UExport
         {
             var provider = Owner?.Provider;
-            if (provider == null) return null;
+            if (provider == null || AssetPathName.IsNone || string.IsNullOrEmpty(AssetPathName.Text)) return null;
             return await TryLoadAsync<T>(provider).ConfigureAwait(false);
         }
 
@@ -138,29 +137,5 @@ namespace CUE4Parse.UE4.Objects.UObject
         public override string ToString() => string.IsNullOrEmpty(SubPathString)
             ? (AssetPathName.IsNone ? "" : AssetPathName.Text)
             : $"{AssetPathName.Text}:{SubPathString}";
-    }
-
-    public class FSoftObjectPathConverter : JsonConverter<FSoftObjectPath>
-    {
-        public override void WriteJson(JsonWriter writer, FSoftObjectPath value, JsonSerializer serializer)
-        {
-            /*var path = value.ToString();
-            writer.WriteValue(path.Length > 0 ? path : "None");*/
-            writer.WriteStartObject();
-
-            writer.WritePropertyName("AssetPathName");
-            serializer.Serialize(writer, value.AssetPathName);
-
-            writer.WritePropertyName("SubPathString");
-            writer.WriteValue(value.SubPathString);
-
-            writer.WriteEndObject();
-        }
-
-        public override FSoftObjectPath ReadJson(JsonReader reader, Type objectType, FSoftObjectPath existingValue, bool hasExistingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
-        }
     }
 }

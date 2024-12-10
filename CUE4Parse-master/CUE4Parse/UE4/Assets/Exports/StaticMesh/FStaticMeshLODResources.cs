@@ -1,4 +1,3 @@
-using System;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Assets.Readers;
 using CUE4Parse.UE4.Objects.Engine;
@@ -17,7 +16,7 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
         public float MaxDeviation { get; }
         public FPositionVertexBuffer? PositionVertexBuffer { get; private set; }
         public FStaticMeshVertexBuffer? VertexBuffer { get; private set; }
-        public FColorVertexBuffer? ColorVertexBuffer { get; private set; }
+        public FColorVertexBuffer? ColorVertexBuffer { get; set; }
         public FRawStaticIndexBuffer? IndexBuffer { get; private set; }
         public FRawStaticIndexBuffer? ReversedIndexBuffer { get; private set; }
         public FRawStaticIndexBuffer? DepthOnlyIndexBuffer { get; private set; }
@@ -38,7 +37,7 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
             CDSF_StripIndexBuffers = 128 | 64 | 32
         }
 
-        public FStaticMeshLODResources(FAssetArchive Ar)
+        public FStaticMeshLODResources(FArchive Ar)
         {
             var stripDataFlags = Ar.Read<FStripDataFlags>();
 
@@ -49,7 +48,7 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
 
             if (!Ar.Versions["StaticMesh.UseNewCookedFormat"])
             {
-                if (!stripDataFlags.IsDataStrippedForServer() && !stripDataFlags.IsClassDataStripped((byte) EClassDataStripFlag.CDSF_MinLodData))
+                if (!stripDataFlags.IsAudioVisualDataStripped() && !stripDataFlags.IsClassDataStripped((byte) EClassDataStripFlag.CDSF_MinLodData))
                 {
                     SerializeBuffersLegacy(Ar, stripDataFlags);
                 }
@@ -62,8 +61,11 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
                 bIsLODCookedOut = Ar.ReadBoolean();
             var bInlined = Ar.ReadBoolean() || Ar.Game == EGame.GAME_RogueCompany;
 
-            if (!stripDataFlags.IsDataStrippedForServer() && !bIsLODCookedOut)
+            if (!stripDataFlags.IsAudioVisualDataStripped() && !bIsLODCookedOut)
             {
+                if (Ar.Game >= EGame.GAME_UE5_5)
+                    _ = Ar.ReadBoolean(); // bHasRayTracingGeometry
+
                 if (bInlined)
                 {
                     SerializeBuffers(Ar);
@@ -77,10 +79,10 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
                             break;
                     }
                 }
-                else
+                else if (Ar is FAssetArchive assetArchive)
                 {
-                    var bulkData = new FByteBulkData(Ar);
-                    if (bulkData.Header.ElementCount > 0)
+                    var bulkData = new FByteBulkData(assetArchive);
+                    if (bulkData.Header.ElementCount > 0 && bulkData.Data != null)
                     {
                         var tempAr = new FByteArchive("StaticMeshBufferReader", bulkData.Data, Ar.Versions);
                         SerializeBuffers(tempAr);
@@ -98,10 +100,15 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
                                 // DepthOnlyIndexBuffer
                                 // ReversedDepthOnlyIndexBuffer
                                 // WireframeIndexBuffer
+
                     if (FUE5ReleaseStreamObjectVersion.Get(Ar) < FUE5ReleaseStreamObjectVersion.Type.RemovingTessellation)
                     {
                         Ar.Position += 2 * 4; // AdjacencyIndexBuffer
                     }
+
+                    if (Ar.Game >= EGame.GAME_UE5_6)
+                        Ar.Position += 6 * 4; // RawDataHeader = 6x uint32
+
                     if (Ar.Game == EGame.GAME_StarWarsJediSurvivor) Ar.Position += 4; // bDropNormals
                 }
 
@@ -116,7 +123,7 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
         }
 
         // Pre-UE4.23 code
-        public void SerializeBuffersLegacy(FAssetArchive Ar, FStripDataFlags stripDataFlags)
+        public void SerializeBuffersLegacy(FArchive Ar, FStripDataFlags stripDataFlags)
         {
             PositionVertexBuffer = new FPositionVertexBuffer(Ar);
             VertexBuffer = new FStaticMeshVertexBuffer(Ar);
@@ -129,8 +136,12 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
                     ColorVertexBuffer = new FColorVertexBuffer(Ar);
                     for (var i = 0; i < numColorStreams - 1; i++)
                     {
-                        var _ = new FColorVertexBuffer(Ar);
+                        _ = new FColorVertexBuffer(Ar);
                     }
+                }
+                else
+                {
+                    ColorVertexBuffer = new FColorVertexBuffer();
                 }
             }
             else
@@ -156,7 +167,7 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
 
                 if (Ar.Ver >= EUnrealEngineObjectUE4Version.FTEXT_HISTORY && Ar.Ver < EUnrealEngineObjectUE4Version.RENAME_CROUCHMOVESCHARACTERDOWN)
                 {
-                    var _ = new FDistanceFieldVolumeData(Ar); // distanceFieldData
+                    _ = new FDistanceFieldVolumeData(Ar); // distanceFieldData
                 }
 
                 if (!stripDataFlags.IsEditorDataStripped())
@@ -170,7 +181,7 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
             {
                 for (var i = 0; i < Sections.Length; i++)
                 {
-                    var _ = new FWeightedRandomSampler(Ar);
+                    _ = new FWeightedRandomSampler(Ar);
                 }
 
                 _ = new FWeightedRandomSampler(Ar);
@@ -189,7 +200,7 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
 
             if (Ar.Game == EGame.GAME_RogueCompany)
             {
-                var _ = new FColorVertexBuffer(Ar);
+                _ = new FColorVertexBuffer(Ar);
             }
 
             IndexBuffer = new FRawStaticIndexBuffer(Ar);
@@ -212,7 +223,10 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
 
             if (Ar.Versions["StaticMesh.HasRayTracingGeometry"] && !stripDataFlags.IsClassDataStripped((byte) EClassDataStripFlag.CDSF_RayTracingResources))
             {
-                var _ = Ar.ReadBulkArray<byte>(); // rayTracingGeometry
+                if (Ar.Game >= EGame.GAME_UE5_6)
+                    Ar.Position += 6 * sizeof(uint); // RawDataHeader = 6x uint32
+
+                _ = Ar.ReadBulkArray<byte>(); // rayTracingGeometry
             }
 
             // https://github.com/EpicGames/UnrealEngine/blob/4.27/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp#L547
@@ -223,43 +237,6 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
             }
 
             _ = new FWeightedRandomSampler(Ar); // areaWeightedSampler
-        }
-    }
-
-    public class FStaticMeshLODResourcesConverter : JsonConverter<FStaticMeshLODResources>
-    {
-        public override void WriteJson(JsonWriter writer, FStaticMeshLODResources value, JsonSerializer serializer)
-        {
-            writer.WriteStartObject();
-
-            writer.WritePropertyName("Sections");
-            serializer.Serialize(writer, value.Sections);
-
-            writer.WritePropertyName("MaxDeviation");
-            writer.WriteValue(value.MaxDeviation);
-
-            writer.WritePropertyName("PositionVertexBuffer");
-            serializer.Serialize(writer, value.PositionVertexBuffer);
-
-            writer.WritePropertyName("VertexBuffer");
-            serializer.Serialize(writer, value.VertexBuffer);
-
-            writer.WritePropertyName("ColorVertexBuffer");
-            serializer.Serialize(writer, value.ColorVertexBuffer);
-
-            if (value.CardRepresentationData != null)
-            {
-                writer.WritePropertyName("CardRepresentationData");
-                serializer.Serialize(writer, value.CardRepresentationData);
-            }
-
-            writer.WriteEndObject();
-        }
-
-        public override FStaticMeshLODResources ReadJson(JsonReader reader, Type objectType, FStaticMeshLODResources existingValue, bool hasExistingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
         }
     }
 }

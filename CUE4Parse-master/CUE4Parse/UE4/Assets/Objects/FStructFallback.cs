@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Readers;
@@ -29,26 +29,43 @@ namespace CUE4Parse.UE4.Assets.Objects
             }
             else
             {
-                UObject.DeserializePropertiesTagged(Properties = new List<FPropertyTag>(), Ar);
+                UObject.DeserializePropertiesTagged(Properties = new List<FPropertyTag>(), Ar, true);
             }
         }
 
-        public T GetOrDefault<T>(string name, T defaultValue = default, StringComparison comparisonType = StringComparison.Ordinal) =>
+        public T GetOrDefault<T>(string name, T defaultValue = default!, StringComparison comparisonType = StringComparison.Ordinal) =>
             PropertyUtil.GetOrDefault<T>(this, name, defaultValue, comparisonType);
+
+        public Lazy<T> GetOrDefaultLazy<T>(string name, T defaultValue = default,
+            StringComparison comparisonType = StringComparison.Ordinal)
+        {
+            throw new NotImplementedException();
+        }
+
         public T Get<T>(string name, StringComparison comparisonType = StringComparison.Ordinal) =>
             PropertyUtil.Get<T>(this, name, comparisonType);
+
+        public Lazy<T> GetLazy<T>(string name, StringComparison comparisonType = StringComparison.Ordinal)
+        {
+            throw new NotImplementedException();
+        }
+
+        public T GetByIndex<T>(int index)
+        {
+            throw new NotImplementedException();
+        }
+
         public bool TryGetValue<T>(out T obj, params string[] names)
         {
             foreach (string name in names)
             {
-                if (GetOrDefault<T>(name, comparisonType: StringComparison.OrdinalIgnoreCase) is { } ret/* && !ret.Equals(default(T))*/)
+                if (this.TryGet<T>(name, out obj, comparisonType: StringComparison.OrdinalIgnoreCase))
                 {
-                    obj = ret;
                     return true;
                 }
             }
 
-            obj = default;
+            obj = default!;
             return false;
         }
         public bool TryGetAllValues<T>(out T[] obj, string name)
@@ -64,32 +81,10 @@ namespace CUE4Parse.UE4.Assets.Objects
 
             obj = new T[maxIndex + 1];
             foreach (var prop in collected) {
-                obj[prop.ArrayIndex] = (T) prop.Tag.GetValue(typeof(T));
+                obj[prop.ArrayIndex] = (T)prop.Tag?.GetValue(typeof(T))!;
             }
 
             return obj.Length > 0;
-        }
-    }
-
-    public class FStructFallbackConverter : JsonConverter<FStructFallback>
-    {
-        public override void WriteJson(JsonWriter writer, FStructFallback value, JsonSerializer serializer)
-        {
-            writer.WriteStartObject();
-
-            foreach (var property in value.Properties)
-            {
-                writer.WritePropertyName(property.Name.Text);
-                serializer.Serialize(writer, property.Tag);
-            }
-
-            writer.WriteEndObject();
-        }
-
-        public override FStructFallback ReadJson(JsonReader reader, Type objectType, FStructFallback existingValue, bool hasExistingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
         }
     }
 }

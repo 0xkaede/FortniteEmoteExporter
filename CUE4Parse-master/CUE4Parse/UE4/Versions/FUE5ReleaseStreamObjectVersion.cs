@@ -110,7 +110,7 @@ namespace CUE4Parse.UE4.Versions
             // Serialize LandscapeActorGuid in FLandscapeActorDesc sub class.
             WorldPartitionLandscapeActorDescSerializeLandscapeActorGuid,
 
-            // add inertia tensor and rotation of mass to convex 
+            // add inertia tensor and rotation of mass to convex
             AddedInertiaTensorAndRotationOfMassAddedToConvex,
 
             // Storing inertia tensor as vec3 instead of matrix.
@@ -134,6 +134,36 @@ namespace CUE4Parse.UE4.Versions
             // Added member reference to linked anim graphs
             LinkedAnimGraphMemberReference,
 
+            // Changed default tangent behavior for new dynamic mesh components
+            DynamicMeshComponentsDefaultUseExternalTangents,
+
+            // Added resize methods to media capture
+            MediaCaptureNewResizeMethods,
+
+            // Function data stores a map from work to debug operands
+            RigVMSaveDebugMapInGraphFunctionData,
+
+            // Changed default Local Exposure Contrast Scale from 1.0 to 0.8
+            LocalExposureDefaultChangeFrom1,
+
+            // Serialize bActorIsListedInSceneOutliner in WorldPartitionActorDesc
+            WorldPartitionActorDescSerializeActorIsListedInSceneOutliner,
+
+            // Disabled opencolorio display configuration by default
+            OpenColorIODisabledDisplayConfigurationDefault,
+
+            // Serialize ExternalDataLayerAsset in WorldPartitionActorDesc
+            WorldPartitionExternalDataLayers,
+
+            // Fix Chaos Cloth fictitious angular scale bug that requires existing parameter rescaling.
+            ChaosClothFictitiousAngularVelocitySubframeFix,
+
+            // Store physics thread particles data in single precision
+            SinglePrecisonParticleDataPT,
+
+            //Orthographic Near and Far Plane Auto-resolve enabled by default
+            OrthographicAutoNearFarPlane,
+
             // -----<new versions can be added above this line>-------------------------------------------------
             VersionPlusOne,
             LatestVersion = VersionPlusOne - 1
@@ -149,8 +179,12 @@ namespace CUE4Parse.UE4.Versions
 
             return Ar.Game switch
             {
+                EGame.GAME_BlackMythWukong => Type.StoreReflectionCaptureEncodedHDRDataInRG11B10Format,
+
                 < EGame.GAME_UE5_0 => Type.BeforeCustomVersionWasAdded,
                 < EGame.GAME_UE5_1 => Type.SerializeFloatPinDefaultValuesAsSinglePrecision,
+                < EGame.GAME_UE5_3 => Type.LinkedAnimGraphMemberReference,
+                < EGame.GAME_UE5_4 => Type.OpenColorIODisabledDisplayConfigurationDefault,
                 _ => Type.LatestVersion
             };
         }

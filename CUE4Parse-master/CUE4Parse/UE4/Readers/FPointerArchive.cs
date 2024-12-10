@@ -1,6 +1,9 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
+
 using CUE4Parse.UE4.Versions;
 
 namespace CUE4Parse.UE4.Readers
@@ -40,6 +43,50 @@ namespace CUE4Parse.UE4.Readers
             }
         }
 
+        public override int ReadAt(long position, byte[] buffer, int offset, int count)
+        {
+            unsafe
+            {
+                int n = (int) (Length - position);
+                if (n > count) n = count;
+                if (n <= 0)
+                    return 0;
+
+                if (n <= 8)
+                {
+                    int byteCount = n;
+                    while (--byteCount >= 0)
+                        buffer[offset + byteCount] = _ptr[position + byteCount];
+                }
+                else
+                    Unsafe.CopyBlockUnaligned(ref buffer[offset], ref _ptr[position], (uint) n);
+
+                return n;
+            }
+        }
+
+        public override Task<int> ReadAtAsync(long position, byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            unsafe
+            {
+                int n = (int) (Length - position);
+                if (n > count) n = count;
+                if (n <= 0)
+                    return Task.FromResult(0);
+
+                if (n <= 8)
+                {
+                    int byteCount = n;
+                    while (--byteCount >= 0)
+                        buffer[offset + byteCount] = _ptr[position + byteCount];
+                }
+                else
+                    Unsafe.CopyBlockUnaligned(ref buffer[offset], ref _ptr[position], (uint) n);
+                
+                return Task.FromResult(n);
+            }
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override long Seek(long offset, SeekOrigin origin)
         {
@@ -72,6 +119,7 @@ namespace CUE4Parse.UE4.Readers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override byte[] ReadBytes(int length)
         {
+            CheckReadSize(length);
             var buffer = new byte[length];
             Read(buffer, 0, length);
             return buffer;

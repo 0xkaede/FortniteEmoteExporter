@@ -1,5 +1,7 @@
-﻿using System;
+using System;
 using System.Runtime.InteropServices;
+using System.Text;
+using CUE4Parse.Encryption.Aes;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Assets.Readers;
 using CUE4Parse.UE4.Exceptions;
@@ -7,6 +9,7 @@ using CUE4Parse.UE4.Objects.Core.Misc;
 using CUE4Parse.UE4.Objects.Core.Serialization;
 using CUE4Parse.UE4.Readers;
 using CUE4Parse.UE4.Versions;
+using Newtonsoft.Json;
 using static CUE4Parse.UE4.Objects.Core.Misc.ECompressionFlags;
 
 namespace CUE4Parse.UE4.Objects.UObject
@@ -28,12 +31,14 @@ namespace CUE4Parse.UE4.Objects.UObject
         public readonly int NameCount;
     }
 
+    [JsonConverter(typeof(FPackageFileSummaryConverter))]
     public class FPackageFileSummary
     {
         public const uint PACKAGE_FILE_TAG = 0x9E2A83C1U;
         public const uint PACKAGE_FILE_TAG_SWAPPED = 0xC1832A9EU;
         public const uint PACKAGE_FILE_TAG_ACE7 = 0x37454341U; // ACE7
         private const uint PACKAGE_FILE_TAG_ONE = 0x00656E6FU; // SOD2
+        private const uint PACKAGE_FILE_TAG_NTE = 0xD5A8D56E;
 
         public readonly uint Tag;
         public FPackageFileVersion FileVersionUE;
@@ -43,16 +48,16 @@ namespace CUE4Parse.UE4.Objects.UObject
         public int TotalHeaderSize;
         public readonly string FolderName;
         public int NameCount;
-        public readonly int NameOffset;
+        public int NameOffset;
         public readonly int SoftObjectPathsCount;
         public readonly int SoftObjectPathsOffset;
         public readonly string? LocalizationId;
         public readonly int GatherableTextDataCount;
         public readonly int GatherableTextDataOffset;
         public int ExportCount;
-        public readonly int ExportOffset;
+        public int ExportOffset;
         public int ImportCount;
-        public readonly int ImportOffset;
+        public int ImportOffset;
         public readonly int DependsOffset;
         public readonly int SoftPackageReferencesCount;
         public readonly int SoftPackageReferencesOffset;
@@ -89,19 +94,19 @@ namespace CUE4Parse.UE4.Objects.UObject
             Tag = Ar.Read<uint>();
 
             /*
-            * The package file version number when this package was saved.
-            *
-            * Lower 16 bits stores the UE3 engine version
-            * Upper 16 bits stores the UE4/licensee version
-            * For newer packages this is -7
-            *		-2 indicates presence of enum-based custom versions
-            *		-3 indicates guid-based custom versions
-            *		-4 indicates removal of the UE3 version. Packages saved with this ID cannot be loaded in older engine versions
-            *		-5 indicates the replacement of writing out the "UE3 version" so older versions of engine can gracefully fail to open newer packages
-            *		-6 indicates optimizations to how custom versions are being serialized
-            *		-7 indicates the texture allocation info has been removed from the summary
-            *		-8 indicates that the UE5 version has been added to the summary
-            */
+             * The package file version number when this package was saved.
+             *
+             * Lower 16 bits stores the UE3 engine version
+             * Upper 16 bits stores the UE4/licensee version
+             * For newer packages this is -7
+             *		-2 indicates presence of enum-based custom versions
+             *		-3 indicates guid-based custom versions
+             *		-4 indicates removal of the UE3 version. Packages saved with this ID cannot be loaded in older engine versions
+             *		-5 indicates the replacement of writing out the "UE3 version" so older versions of engine can gracefully fail to open newer packages
+             *		-6 indicates optimizations to how custom versions are being serialized
+             *		-7 indicates the texture allocation info has been removed from the summary
+             *		-8 indicates that the UE5 version has been added to the summary
+             */
             const int CurrentLegacyFileVersion = -8;
             var legacyFileVersion = CurrentLegacyFileVersion;
 
@@ -116,6 +121,31 @@ namespace CUE4Parse.UE4.Objects.UObject
                 FolderName = "None";
                 PackageFlags = EPackageFlags.PKG_FilterEditorOnly;
                 goto afterPackageFlags;
+            }
+
+            if (Tag == PACKAGE_FILE_TAG_NTE && Ar.Game == EGame.GAME_NevernessToEverness)
+            {
+                var keyData = Ar.Read<FGuid>();
+                var decryptedDataLength = Ar.Read<int>();
+                _ = Ar.Read<int>(); // paddedEncryptedDataLength
+                var encryptedData = Ar.ReadArray<byte>();
+                var isKeyObfuscated = Ar.ReadBoolean();
+
+                if (isKeyObfuscated)
+                {
+                    keyData = new FGuid(
+                        keyData.A ^ keyData.D,
+                        keyData.B ^ keyData.C,
+                        keyData.B,
+                        keyData.A);
+                }
+
+                var key = new FAesKey(Encoding.UTF8.GetBytes(keyData.ToString()));
+                var paddedDecryptedData = encryptedData.Decrypt(key);
+                var decryptedData = paddedDecryptedData[..decryptedDataLength];
+
+                Ar = new FByteArchive("NTE - Decrypted FPackageFileSummary", decryptedData, Ar.Versions);
+                Tag = Ar.Read<uint>();
             }
 
             if (Tag != PACKAGE_FILE_TAG && Tag != PACKAGE_FILE_TAG_SWAPPED)
@@ -134,6 +164,7 @@ namespace CUE4Parse.UE4.Objects.UObject
             }
 
             legacyFileVersion = Ar.Read<int>();
+            if (Ar.Game == EGame.GAME_DeltaForceHawkOps) legacyFileVersion /= 659;
 
             if (legacyFileVersion < 0) // means we have modern version numbers
             {
@@ -159,7 +190,7 @@ namespace CUE4Parse.UE4.Objects.UObject
                 }
 
                 FileVersionLicenseeUE = Ar.Read<EUnrealEngineObjectLicenseeUEVersion>();
-                CustomVersionContainer = legacyFileVersion <= -2 ? new FCustomVersionContainer(Ar) : new FCustomVersionContainer();
+                CustomVersionContainer = new FCustomVersionContainer(Ar, FCustomVersionContainer.DetermineSerializationFormat(legacyFileVersion));
 
                 if (Ar.Versions.CustomVersions == null && CustomVersionContainer.Versions.Length > 0)
                 {
@@ -190,7 +221,7 @@ namespace CUE4Parse.UE4.Objects.UObject
             }
 
             TotalHeaderSize = Ar.Read<int>();
-            FolderName = Ar.ReadFString();
+            FolderName = Ar.ReadFString(); // PackageGroup
             PackageFlags = Ar.Read<EPackageFlags>();
 
             /*if (PackageFlags.HasFlag(EPackageFlags.PKG_FilterEditorOnly))
@@ -230,8 +261,8 @@ namespace CUE4Parse.UE4.Objects.UObject
 
             if (FileVersionUE < EUnrealEngineObjectUE4Version.OLDEST_LOADABLE_PACKAGE || FileVersionUE > EUnrealEngineObjectUE4Version.AUTOMATIC_VERSION)
             {
-                Generations = Array.Empty<FGenerationInfo>();
-                ChunkIds = Array.Empty<int>();
+                Generations = [];
+                ChunkIds = [];
                 return; // we can't safely load more than this because the below was different in older files.
             }
 
@@ -272,6 +303,8 @@ namespace CUE4Parse.UE4.Objects.UObject
             }
 
             Generations = Ar.ReadArray<FGenerationInfo>();
+
+            if (Ar.Game == EGame.GAME_DeltaForceHawkOps) Ar.Position += 16;
 
             if (FileVersionUE >= EUnrealEngineObjectUE4Version.ENGINE_VERSION_OBJECT)
             {
@@ -346,16 +379,16 @@ namespace CUE4Parse.UE4.Objects.UObject
 
             if (Ar.Game == EGame.GAME_TowerOfFantasy)
             {
-                TotalHeaderSize = (int)(TotalHeaderSize ^ 0xEEB2CEC7);
-                NameCount = (int)(NameCount ^ 0xEEB2CEC7);
-                NameOffset = (int)(NameOffset ^ 0xEEB2CEC7);
-                ExportCount = (int)(ExportCount ^ 0xEEB2CEC7);
-                ExportOffset = (int)(ExportOffset ^ 0xEEB2CEC7);
-                ImportCount = (int)(ImportCount ^ 0xEEB2CEC7);
-                ImportOffset = (int)(ImportOffset ^ 0xEEB2CEC7);
-                DependsOffset = (int)(DependsOffset ^ 0xEEB2CEC7);
-                PackageSource = (int)(PackageSource ^ 0xEEB2CEC7);
-                AssetRegistryDataOffset = (int)(AssetRegistryDataOffset ^ 0xEEB2CEC7);
+                TotalHeaderSize = (int) (TotalHeaderSize ^ 0xEEB2CEC7);
+                NameCount = (int) (NameCount ^ 0xEEB2CEC7);
+                NameOffset = (int) (NameOffset ^ 0xEEB2CEC7);
+                ExportCount = (int) (ExportCount ^ 0xEEB2CEC7);
+                ExportOffset = (int) (ExportOffset ^ 0xEEB2CEC7);
+                ImportCount = (int) (ImportCount ^ 0xEEB2CEC7);
+                ImportOffset = (int) (ImportOffset ^ 0xEEB2CEC7);
+                DependsOffset = (int) (DependsOffset ^ 0xEEB2CEC7);
+                PackageSource = (int) (PackageSource ^ 0xEEB2CEC7);
+                AssetRegistryDataOffset = (int) (AssetRegistryDataOffset ^ 0xEEB2CEC7);
             }
 
             if (Ar.Game is EGame.GAME_SeaOfThieves or EGame.GAME_GearsOfWar4)
@@ -380,11 +413,11 @@ namespace CUE4Parse.UE4.Objects.UObject
             else if (FileVersionUE >= EUnrealEngineObjectUE4Version.ADDED_CHUNKID_TO_ASSETDATA_AND_UPACKAGE)
             {
                 var chunkId = Ar.Read<int>();
-                ChunkIds = chunkId < 0 ? Array.Empty<int>() : new[] { chunkId };
+                ChunkIds = chunkId < 0 ? [] : [chunkId];
             }
             else
             {
-                ChunkIds = Array.Empty<int>();
+                ChunkIds = [];
             }
 
             if (FileVersionUE >= EUnrealEngineObjectUE4Version.PRELOAD_DEPENDENCIES_IN_COOKED_EXPORTS)
@@ -400,7 +433,7 @@ namespace CUE4Parse.UE4.Objects.UObject
 
             NamesReferencedFromExportDataCount = FileVersionUE >= EUnrealEngineObjectUE5Version.NAMES_REFERENCED_FROM_EXPORT_DATA ? Ar.Read<int>() : NameCount;
             PayloadTocOffset = FileVersionUE >= EUnrealEngineObjectUE5Version.PAYLOAD_TOC ? Ar.Read<long>() : -1;
-            DataResourceOffset = FileVersionUE >= EUnrealEngineObjectUE5Version.DATA_RESOURCES ? Ar.Read<int>() : -1;
+            DataResourceOffset = FileVersionUE >= EUnrealEngineObjectUE5Version.DATA_RESOURCES || Ar.Game == EGame.GAME_TheFirstDescendant ? Ar.Read<int>() : -1;
 
             if (Tag == PACKAGE_FILE_TAG_ONE && Ar is FAssetArchive assetAr)
             {

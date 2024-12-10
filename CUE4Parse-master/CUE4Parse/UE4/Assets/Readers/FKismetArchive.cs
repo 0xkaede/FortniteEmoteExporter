@@ -39,8 +39,10 @@ public class FKismetArchive : FArchive
             EExprToken.EX_JumpIfNot => new EX_JumpIfNot(this),
             EExprToken.EX_Assert => new EX_Assert(this),
             EExprToken.EX_Nothing => new EX_Nothing(),
+            EExprToken.EX_NothingInt32 => new EX_NothingInt32(this),
             EExprToken.EX_Let => new EX_Let(this),
             EExprToken.EX_ClassContext => new EX_ClassContext(this),
+            EExprToken.EX_BitFieldConst => new EX_BitFieldConst(this),
             EExprToken.EX_MetaCast => new EX_MetaCast(this),
             EExprToken.EX_LetBool => new EX_LetBool(this),
             EExprToken.EX_EndParmValue => new EX_EndParmValue(),
@@ -126,7 +128,10 @@ public class FKismetArchive : FArchive
             EExprToken.EX_ArrayGetByRef => new EX_ArrayGetByRef(this),
             EExprToken.EX_ClassSparseDataVariable => new EX_ClassSparseDataVariable(this),
             EExprToken.EX_FieldPathConst => new EX_FieldPathConst(this),
-            _ => throw new ParserException("Unknown EExprToken")
+            EExprToken.EX_AutoRtfmStopTransact => new EX_AutoRtfmStopTransact(this),
+            EExprToken.EX_AutoRtfmTransact => new EX_AutoRtfmTransact(this),
+            EExprToken.EX_AutoRtfmAbortIfNot => new EX_AutoRtfmAbortIfNot(),
+            _ => throw new ParserException($"Unknown EExprToken {token}")
         };
         expression.StatementIndex = index;
         return expression;
@@ -143,9 +148,15 @@ public class FKismetArchive : FArchive
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public string XFERUNICODESTRING()
     {
-        var length = _data.AsSpan((int)Position).IndexOf(stackalloc byte[2]);
-        if (length == -1) throw new ParserException("Couldn't find end of the string");
-        if (length % 2 == 1) length++;
+        var pos = (int)Position;
+        var length = -1;
+        Span<byte> terminator = stackalloc byte[2];
+        do
+        {
+            length += _data.AsSpan(pos + length + 1).IndexOf(terminator) + 1;
+        }
+        while (length % 2 != 0 || length == -1);
+        if (length == -1) throw new ParserException("Couldn't find end of the unicode string");
         return Encoding.Unicode.GetString(ReadBytes(length));
     }
 

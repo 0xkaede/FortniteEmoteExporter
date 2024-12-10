@@ -29,7 +29,7 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
             UseFullPrecisionUVs = Ar.ReadBoolean();
             UseHighPrecisionTangentBasis = Ar.Game >= EGame.GAME_UE4_12 && Ar.ReadBoolean();
 
-            if (!stripDataFlags.IsDataStrippedForServer())
+            if (!stripDataFlags.IsAudioVisualDataStripped())
             {
                 if (Ar.Game < EGame.GAME_UE4_19)
                 {
@@ -78,43 +78,14 @@ namespace CUE4Parse.UE4.Assets.Exports.StaticMesh
                                 UV[i] = new FStaticMeshUVItem(tempTangents[i], uv[i]);
                             }
                         }
+
+                        if (Ar.Game == EGame.GAME_TorchlightInfinite) Ar.SkipBulkArrayData();
                 }
             }
             else
             {
                 UV = Array.Empty<FStaticMeshUVItem>();
             }
-        }
-    }
-
-    public class FStaticMeshVertexBufferConverter : JsonConverter<FStaticMeshVertexBuffer>
-    {
-        public override void WriteJson(JsonWriter writer, FStaticMeshVertexBuffer value, JsonSerializer serializer)
-        {
-            writer.WriteStartObject();
-
-            writer.WritePropertyName("NumTexCoords");
-            writer.WriteValue(value.NumTexCoords);
-
-            writer.WritePropertyName("NumVertices");
-            writer.WriteValue(value.NumVertices);
-
-            writer.WritePropertyName("Strides");
-            writer.WriteValue(value.Strides);
-
-            writer.WritePropertyName("UseHighPrecisionTangentBasis");
-            writer.WriteValue(value.UseHighPrecisionTangentBasis);
-
-            writer.WritePropertyName("UseFullPrecisionUVs");
-            writer.WriteValue(value.UseFullPrecisionUVs);
-
-            writer.WriteEndObject();
-        }
-
-        public override FStaticMeshVertexBuffer ReadJson(JsonReader reader, Type objectType, FStaticMeshVertexBuffer existingValue, bool hasExistingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
         }
     }
 }

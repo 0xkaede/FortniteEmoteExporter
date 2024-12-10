@@ -1,4 +1,3 @@
-﻿using System;
 using System.Collections.Generic;
 using CUE4Parse.UE4.Assets.Exports.Internationalization;
 using CUE4Parse.UE4.Assets.Readers;
@@ -147,20 +146,6 @@ namespace CUE4Parse.UE4.Objects.Core.i18N
         public override string ToString() => Text;
     }
 
-    public class FTextConverter : JsonConverter<FText>
-    {
-        public override void WriteJson(JsonWriter writer, FText value, JsonSerializer serializer)
-        {
-            serializer.Serialize(writer, value.TextHistory);
-        }
-
-        public override FText ReadJson(JsonReader reader, Type objectType, FText existingValue, bool hasExistingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
-        }
-    }
-
     public abstract class FTextHistory : IUStruct
     {
         [JsonIgnore] public abstract string Text { get; }
@@ -224,8 +209,9 @@ namespace CUE4Parse.UE4.Objects.Core.i18N
             public NamedFormat(FAssetArchive Ar)
             {
                 SourceFmt = new FText(Ar);
-                Arguments = new Dictionary<string, FFormatArgumentValue>(Ar.Read<int>());
-                for (int i = 0; i < Arguments.Count; i++)
+                int ArgCount = Ar.Read<int>();
+                Arguments = new Dictionary<string, FFormatArgumentValue>(ArgCount);
+                for (int i = 0; i < ArgCount; i++)
                 {
                     Arguments[Ar.ReadFString()] = new FFormatArgumentValue(Ar);
                 }
@@ -358,7 +344,9 @@ namespace CUE4Parse.UE4.Objects.Core.i18N
         {
             public readonly FName TableId;
             public readonly string Key;
-            public override string Text { get; }
+            public readonly string SourceString;
+            public readonly string LocalizedString;
+            public override string Text => LocalizedString;
 
             public StringTableEntry(FAssetArchive Ar)
             {
@@ -366,9 +354,10 @@ namespace CUE4Parse.UE4.Objects.Core.i18N
                 Key = Ar.ReadFString();
 
                 if (Ar.Owner.Provider!.TryLoadObject(TableId.Text, out UStringTable table) &&
-                    table.StringTable.KeysToMetaData.TryGetValue(Key, out var t))
+                    table.StringTable.KeysToEntries.TryGetValue(Key, out var t))
                 {
-                    Text = t;
+                    SourceString = t;
+                    LocalizedString = Ar.Owner.Provider!.GetLocalizedString(table.StringTable.TableNamespace, Key, t);
                 }
             }
         }
@@ -396,13 +385,13 @@ namespace CUE4Parse.UE4.Objects.Core.i18N
         public EFormatArgumentType Type;
         public object Value;
 
-        public FFormatArgumentValue(FAssetArchive Ar)
+        public FFormatArgumentValue(FAssetArchive Ar, bool isArgumentData = false)
         {
             Type = Ar.Read<EFormatArgumentType>();
             Value = Type switch
             {
                 EFormatArgumentType.Text => new FText(Ar),
-                EFormatArgumentType.Int => Ar.Game == EGame.GAME_HogwartsLegacy ? Ar.Read<int>() : Ar.Read<long>(),
+                EFormatArgumentType.Int => isArgumentData && FUE5ReleaseStreamObjectVersion.Get(Ar) < FUE5ReleaseStreamObjectVersion.Type.TextFormatArgumentData64bitSupport ? Ar.Read<int>() : Ar.Read<long>(),
                 EFormatArgumentType.UInt => Ar.Read<ulong>(),
                 EFormatArgumentType.Double => Ar.Read<double>(),
                 EFormatArgumentType.Float => Ar.Read<float>(),
@@ -419,7 +408,7 @@ namespace CUE4Parse.UE4.Objects.Core.i18N
         public FFormatArgumentData(FAssetArchive Ar)
         {
             ArgumentName = Ar.ReadFString();
-            ArgumentValue = new FFormatArgumentValue(Ar);
+            ArgumentValue = new FFormatArgumentValue(Ar, true);
         }
     }
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+
 using CUE4Parse.UE4.Assets;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Objects;
@@ -10,8 +11,9 @@ using CUE4Parse.UE4.Objects.Core.Misc;
 using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse.UE4.Readers;
 using CUE4Parse.Utils;
-using Ionic.Crc;
+
 using Newtonsoft.Json;
+
 using Serilog;
 
 namespace CUE4Parse.GameTypes.FN.Assets.Exports
@@ -59,6 +61,7 @@ namespace CUE4Parse.GameTypes.FN.Assets.Exports
         AddedSubobjectSerialization,
         RefactoredSubobjectSerialization,
         RemoveInvalidEventBindings,
+        AddRedirectForPackageName,
 
         VersionPlusOne,
         LatestVersion = VersionPlusOne - 1
@@ -361,12 +364,16 @@ namespace CUE4Parse.GameTypes.FN.Assets.Exports
 
                 base.Deserialize(Ar, validPos);
 
+                TemplateRecords = new Dictionary<int, FActorTemplateRecord>();
                 ActorData = new List<FStructFallback>();
                 foreach (var kv in GetOrDefault<UScriptMap>("TemplateRecords").Properties)
                 {
-                    var val = kv.Value?.GetValue(typeof(FActorTemplateRecord));
-                    if (val is not FActorTemplateRecord templeteRecords) continue;
-                    ActorData.Add(templeteRecords.ReadActorData(Owner, SaveVersion));
+                    var templateRecord = kv.Value?.GetValue<FActorTemplateRecord>();
+                    if (templateRecord is null) continue;
+                    
+                    var templateIndex = kv.Key.GetValue<int>();
+                    TemplateRecords[templateIndex] = templateRecord;
+                    ActorData.Add(templateRecord.ReadActorData(Owner, SaveVersion));
                 }
             }
         }

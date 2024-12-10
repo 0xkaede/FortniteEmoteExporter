@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -62,12 +63,12 @@ public class UsmapParser
             {
                 if (compSize != decompSize)
                     throw new ParserException("No compression: Compression size must be equal to decompression size");
-                var _ = Ar.Read(data, 0, (int) compSize);
+                _ = Ar.Read(data, 0, (int) compSize);
                 break;
             }
             case EUsmapCompressionMethod.Oodle:
             {
-                Oodle.Decompress(Ar.ReadBytes((int) compSize), 0, (int) compSize, data, 0, (int) decompSize);
+                OodleHelper.Decompress(Ar.ReadBytes((int) compSize), 0, (int) compSize, data, 0, (int) decompSize);
                 break;
             }
             case EUsmapCompressionMethod.Brotli:
@@ -91,7 +92,7 @@ public class UsmapParser
         var nameLut = new List<string>((int) nameSize);
         for (var i = 0; i < nameSize; i++)
         {
-            var nameLength = Ar.Read<byte>();
+            var nameLength = Ar.Version >= EUsmapVersion.LongFName ? Ar.Read<ushort>() : Ar.Read<byte>();
             nameLut.Add(Ar.ReadStringUnsafe(nameLength));
         }
 
@@ -101,7 +102,7 @@ public class UsmapParser
         {
             var enumName = Ar.ReadName(nameLut)!;
 
-            var enumNamesSize = Ar.Read<byte>();
+            var enumNamesSize = Ar.Version >= EUsmapVersion.LargeEnums ? Ar.Read<ushort>() : Ar.Read<byte>();
             var enumNames = new Dictionary<int, string>(enumNamesSize);
             for (var j = 0; j < enumNamesSize; j++)
             {
@@ -109,11 +110,12 @@ public class UsmapParser
                 enumNames[j] = value;
             }
 
-            enums.Add(enumName, enumNames);
+            // Some companies man... Their duplicated enums, even with different values, have to be ignored.
+            enums.TryAdd(enumName, enumNames);
         }
 
         var structCount = Ar.Read<uint>();
-        var structs = new Dictionary<string, Struct>();
+        var structs = new Dictionary<string, Struct>(StringComparer.OrdinalIgnoreCase);
 
         var mappings = new TypeMappings(structs, enums);
 

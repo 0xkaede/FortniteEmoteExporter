@@ -60,6 +60,12 @@ namespace CUE4Parse.UE4.Objects.UObject
             Ar.Index += 4;
         }
 
+        public FPackageIndex(IPackage owner, int index)
+        {
+            Index = index;
+            Owner = owner;
+        }
+
         public FPackageIndex()
         {
             Index = 0;
@@ -121,7 +127,7 @@ namespace CUE4Parse.UE4.Objects.UObject
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public async Task<UExport> LoadAsync()
+        public async Task<UExport?> LoadAsync()
         {
             if (ResolvedObject != null)
                 return await ResolvedObject.LoadAsync();
@@ -144,68 +150,6 @@ namespace CUE4Parse.UE4.Objects.UObject
         #endregion
     }
 
-    public class FPackageIndexConverter : JsonConverter<FPackageIndex>
-    {
-        public override void WriteJson(JsonWriter writer, FPackageIndex value, JsonSerializer serializer)
-        {
-            #region V3
-            serializer.Serialize(writer, value.ResolvedObject);
-            #endregion
-
-            #region V2
-            // var resolved = value.Owner?.ResolvePackageIndex(value);
-            // if (resolved != null)
-            // {
-            //     var outerChain = new List<string>();
-            //     var current = resolved;
-            //     while (current != null)
-            //     {
-            //         outerChain.Add(current.Name.Text);
-            //         current = current.Outer;
-            //     }
-            //
-            //     var sb = new StringBuilder(256);
-            //     for (int i = 1; i <= outerChain.Count; i++)
-            //     {
-            //         var name = outerChain[outerChain.Count - i];
-            //         sb.Append(name);
-            //         if (i < outerChain.Count)
-            //         {
-            //             sb.Append(i > 1 ? ":" : ".");
-            //         }
-            //     }
-            //
-            //     writer.WriteValue($"{resolved.Class?.Name}'{sb}'");
-            // }
-            // else
-            // {
-            //     writer.WriteValue("None");
-            // }
-            #endregion
-
-            #region V1
-            // if (value.ImportObject != null)
-            // {
-            //     serializer.Serialize(writer, value.ImportObject);
-            // }
-            // else if (value.ExportObject != null)
-            // {
-            //     serializer.Serialize(writer, value.ExportObject);
-            // }
-            // else
-            // {
-            //     writer.WriteValue(value.Index);
-            // }
-            #endregion
-        }
-
-        public override FPackageIndex ReadJson(JsonReader reader, Type objectType, FPackageIndex existingValue, bool hasExistingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
-        }
-    }
-
 
     /// <summary>
     /// Base class for UObject resource types.  FObjectResources are used to store UObjects on disk
@@ -216,42 +160,11 @@ namespace CUE4Parse.UE4.Objects.UObject
     public abstract class FObjectResource : IObject
     {
         public FName ObjectName;
-        public FPackageIndex OuterIndex;
+        public FPackageIndex? OuterIndex;
 
         public override string ToString()
         {
             return ObjectName.Text;
-        }
-    }
-
-    public class FObjectResourceConverter : JsonConverter<FObjectResource>
-    {
-        public override void WriteJson(JsonWriter writer, FObjectResource value, JsonSerializer serializer)
-        {
-            writer.WriteStartObject();
-
-            switch (value)
-            {
-                case FObjectImport i:
-                    writer.WritePropertyName("ObjectName");
-                    writer.WriteValue($"{i.ObjectName.Text}:{i.ClassName.Text}");
-                    break;
-                case FObjectExport e:
-                    writer.WritePropertyName("ObjectName");
-                    writer.WriteValue($"{e.ObjectName.Text}:{e.ClassName}");
-                    break;
-            }
-
-            writer.WritePropertyName("OuterIndex");
-            serializer.Serialize(writer, value.OuterIndex);
-
-            writer.WriteEndObject();
-        }
-
-        public override FObjectResource ReadJson(JsonReader reader, Type objectType, FObjectResource existingValue, bool hasExistingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
         }
     }
 
@@ -277,6 +190,8 @@ namespace CUE4Parse.UE4.Objects.UObject
         public int CreateBeforeSerializationDependencies;
         public int SerializationBeforeCreateDependencies;
         public int CreateBeforeCreateDependencies;
+        public long ScriptSerializationStartOffset;
+        public long ScriptSerializationEndOffset;
         public Lazy<UExport> ExportObject;
 
         public string ClassName;
@@ -333,6 +248,17 @@ namespace CUE4Parse.UE4.Objects.UObject
                 CreateBeforeCreateDependencies = 0;
             }
 
+            if (!Ar.HasUnversionedProperties && Ar.Ver >= EUnrealEngineObjectUE5Version.SCRIPT_SERIALIZATION_OFFSET)
+            {
+                ScriptSerializationStartOffset = Ar.Read<long>();
+                ScriptSerializationEndOffset = Ar.Read<long>();
+            }
+            else
+            {
+                ScriptSerializationStartOffset = 0;
+                ScriptSerializationEndOffset = 0;
+            }
+
             ClassName = ClassIndex.Name;
         }
 
@@ -369,7 +295,9 @@ namespace CUE4Parse.UE4.Objects.UObject
             {
                 PackageName = Ar.ReadFName();
             }
-            
+
+            if (Ar.Game == EGame.GAME_RacingMaster) Ar.Position += 1;
+
             ImportOptional = Ar.Ver >= EUnrealEngineObjectUE5Version.OPTIONAL_RESOURCES && Ar.ReadBoolean();
         }
     }

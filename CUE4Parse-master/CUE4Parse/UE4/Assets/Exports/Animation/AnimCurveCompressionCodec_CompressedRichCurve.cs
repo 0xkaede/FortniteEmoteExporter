@@ -28,48 +28,6 @@ namespace CUE4Parse.UE4.Assets.Exports.Animation
         }
     }
 
-    public class FCurveDescConverter : JsonConverter<FCurveDesc>
-    {
-        public override void WriteJson(JsonWriter writer, FCurveDesc value, JsonSerializer serializer)
-        {
-            writer.WriteStartObject();
-
-            writer.WritePropertyName("CompressionFormat");
-            writer.WriteValue(value.CompressionFormat.ToString());
-
-            writer.WritePropertyName("KeyTimeCompressionFormat");
-            writer.WriteValue(value.KeyTimeCompressionFormat.ToString());
-
-            writer.WritePropertyName("PreInfinityExtrap");
-            writer.WriteValue(value.PreInfinityExtrap.ToString());
-
-            writer.WritePropertyName("PostInfinityExtrap");
-            writer.WriteValue(value.PostInfinityExtrap.ToString());
-
-            if (value.CompressionFormat == RCCF_Constant)
-            {
-                writer.WritePropertyName("ConstantValue");
-                writer.WriteValue(value.ConstantValue);
-            }
-            else
-            {
-                writer.WritePropertyName("NumKeys");
-                writer.WriteValue(value.NumKeys);
-            }
-
-            writer.WritePropertyName("KeyDataOffset");
-            writer.WriteValue(value.KeyDataOffset);
-
-            writer.WriteEndObject();
-        }
-
-        public override FCurveDesc ReadJson(JsonReader reader, Type objectType, FCurveDesc existingValue, bool hasExistingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
-        }
-    }
-
     public class UAnimCurveCompressionCodec_CompressedRichCurve : UAnimCurveCompressionCodec
     {
         private unsafe delegate FRichCurve CompressedCurveConverter(ERichCurveExtrapolation preInfinityExtrap, ERichCurveExtrapolation postInfinityExtrap, int constantValueNumKeys, byte* compressedKeys);
@@ -81,14 +39,14 @@ namespace CUE4Parse.UE4.Assets.Exports.Animation
             {
                 (preInfinityExtrap, postInfinityExtrap, constantValue, _) => new FRichCurve
                 {
-                    DefaultValue = *(float*) &constantValue,
+                    DefaultValue = Unsafe.As<int, float>(ref constantValue),
                     PreInfinityExtrap = preInfinityExtrap,
                     PostInfinityExtrap = postInfinityExtrap,
                     Keys = Array.Empty<FRichCurveKey>()
                 },
                 (preInfinityExtrap, postInfinityExtrap, constantValue, _) => new FRichCurve
                 {
-                    DefaultValue = *(float*) &constantValue,
+                    DefaultValue = Unsafe.As<int, float>(ref constantValue),
                     PreInfinityExtrap = preInfinityExtrap,
                     PostInfinityExtrap = postInfinityExtrap,
                     Keys = Array.Empty<FRichCurveKey>()
@@ -102,14 +60,14 @@ namespace CUE4Parse.UE4.Assets.Exports.Animation
                     DefaultValue = 3.402823466e+38f, // MAX_flt
                     PreInfinityExtrap = preInfinityExtrap,
                     PostInfinityExtrap = postInfinityExtrap,
-                    Keys = new FRichCurveKey[] { new(0.0f, *(float*) &constantValue) }
+                    Keys = new FRichCurveKey[] { new(0.0f, Unsafe.As<int, float>(ref constantValue)) }
                 },
                 (preInfinityExtrap, postInfinityExtrap, constantValue, _) => new FRichCurve
                 {
                     DefaultValue = 3.402823466e+38f, // MAX_flt
                     PreInfinityExtrap = preInfinityExtrap,
                     PostInfinityExtrap = postInfinityExtrap,
-                    Keys = new FRichCurveKey[] { new(0.0f, *(float*) &constantValue) }
+                    Keys = new FRichCurveKey[] { new(0.0f, Unsafe.As<int, float>(ref constantValue)) }
                 }
             },
             // RCCF_Linear
@@ -215,6 +173,7 @@ namespace CUE4Parse.UE4.Assets.Exports.Animation
                     RCCF_Linear => RCIM_Linear,
                     RCCF_Cubic => RCIM_Cubic,
                     RCCF_Constant => RCIM_Constant,
+                    RCCF_Empty => RCIM_None,
                     _ => throw new ArgumentException("Can't convert interpMode " + interpMode + " to ERichCurveInterpMode")
                 };
                 key.TangentMode = RCTM_Auto; // How to convert? interpMode == RCCF_Weighted && keyDataAdapter.GetKeyTangentWeightMode(keyIndex) != RCTWM_WeightedNone ? RCTM_User : RCTM_Auto;
@@ -252,7 +211,7 @@ namespace CUE4Parse.UE4.Assets.Exports.Animation
                     var rawCurve = ConverterMap[(int) curve.CompressionFormat][(int) curve.KeyTimeCompressionFormat](curve.PreInfinityExtrap, curve.PostInfinityExtrap, curve.NumKeys, compressedKeys);
                     floatCurves[curveIndex] = new FFloatCurve
                     {
-                        Name = curveName,
+                        CurveName = curveName.DisplayName,
                         FloatCurve = rawCurve,
                         CurveTypeFlags = 4
                     };

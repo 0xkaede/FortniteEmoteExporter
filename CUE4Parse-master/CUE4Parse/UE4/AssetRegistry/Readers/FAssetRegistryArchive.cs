@@ -18,6 +18,7 @@ namespace CUE4Parse.UE4.AssetRegistry.Readers
         {
             baseArchive = Ar;
             Header = header;
+            NameMap = [];
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

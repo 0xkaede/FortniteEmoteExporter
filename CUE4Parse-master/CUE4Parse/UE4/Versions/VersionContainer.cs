@@ -73,6 +73,9 @@ namespace CUE4Parse.UE4.Versions
             // objects
             Options["MorphTarget"] = true;
 
+            // structs
+            Options["Vector_NetQuantize_AsStruct"] = false;
+
             // fields
             Options["RawIndexBuffer.HasShouldExpandTo32Bit"] = Game >= GAME_UE4_25;
             Options["ShaderMap.UseNewCookedFormat"] = Game >= GAME_UE5_0;
@@ -87,7 +90,13 @@ namespace CUE4Parse.UE4.Versions
             Options["AnimSequence.HasCompressedRawSize"] = Game >= GAME_UE4_17; // Early 4.17 builds don't have this, and some custom engine builds don't either.
             Options["StaticMesh.HasNavCollision"] = Ver >= EUnrealEngineObjectUE4Version.STATIC_MESH_STORE_NAV_COLLISION && Game != GAME_GearsOfWar4 && Game != GAME_TEKKEN7;
 
+            // special general property workarounds
+            Options["ByteProperty.TMap64Bit"] = false;
+            Options["ByteProperty.TMap16Bit"] = false;
+            Options["ByteProperty.TMap8Bit"] = false;
+
             // defaults
+            Options["StripAdditiveRefPose"] = false;
             Options["SkeletalMesh.KeepMobileMinLODSettingOnDesktop"] = false;
             Options["StaticMesh.KeepMobileMinLODSettingOnDesktop"] = false;
 
@@ -107,6 +116,7 @@ namespace CUE4Parse.UE4.Versions
             MapStructTypes["SubSequences"] = new KeyValuePair<string, string>("MovieSceneSequenceID", null);
             MapStructTypes["Hierarchy"] = new KeyValuePair<string, string>("MovieSceneSequenceID", null);
             MapStructTypes["TrackSignatureToTrackIdentifier"] = new KeyValuePair<string, string>("Guid", "MovieSceneTrackIdentifier");
+            MapStructTypes["UserParameterRedirects"] = new KeyValuePair<string, string>("NiagaraVariable", "NiagaraVariable");
 
             if (_mapStructTypesOverrides == null) return;
             foreach (var (key, value) in _mapStructTypesOverrides)

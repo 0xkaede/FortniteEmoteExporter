@@ -71,6 +71,7 @@ public class FTexturePlatformData
 
         if (HasOptData())
         {
+            if (Ar.Game == EGame.GAME_MidnightSuns) Ar.Position += 4;
             OptData = Ar.Read<FOptTexturePlatformData>();
         }
 
@@ -96,15 +97,20 @@ public class FTexturePlatformData
             Mips[i] = new FTexture2DMipMap(Ar);
 
             if (Owner is UVolumeTexture or UTextureCube)
+            {
                 Mips[i].SizeY *= GetNumSlices();
+                Mips[i].SizeZ = Mips[i].SizeZ == GetNumSlices() ? 1 : Mips[i].SizeZ;
+            }
+
         }
 
-        if (Ar.Versions["VirtualTextures"] && Ar.Platform != ETexturePlatform.Playstation) // TODO: Until we figure out how to calculate mipCount properly, VT has to be ignored.
+        if (Ar.Versions["VirtualTextures"])
         {
             var bIsVirtual = Ar.ReadBoolean();
             if (bIsVirtual)
             {
-                VTData = new FVirtualTextureBuiltData(Ar, FirstMipToSerialize);
+                var LODBias = Owner.GetOrDefault<int>("LODBias");
+                VTData = new FVirtualTextureBuiltData(Ar, FirstMipToSerialize - LODBias);
             }
         }
 

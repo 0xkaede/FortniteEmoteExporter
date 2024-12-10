@@ -41,6 +41,7 @@ namespace CUE4Parse_Conversion.Animations
                 animSet.Sequences.Add(seq);
             }
 
+            animSet.TotalAnimTime = animComposite.AnimationTrack.GetLength();
             return animSet;
         }
 
@@ -49,20 +50,55 @@ namespace CUE4Parse_Conversion.Animations
             var animSet = skeleton.ConvertToAnimSet();
             if (animMontage == null) return animSet;
 
-            foreach (var compositeSection in animMontage.CompositeSections)
+            foreach (var slotAnimTrack in animMontage.SlotAnimTracks)
             {
-                var segment = animMontage.SlotAnimTracks[compositeSection.SlotIndex].AnimTrack.AnimSegments[compositeSection.SegmentIndex];
-                if (!segment.AnimReference.TryLoad(out UAnimSequence animSequence) || !compositeSection.LinkedSequence.TryLoad(out animSequence))
-                    continue;
+                foreach (var segment in slotAnimTrack.AnimTrack.AnimSegments)
+                {
+                    if (!segment.AnimReference.TryLoad(out UAnimSequence animSequence))
+                        continue;
 
-                var seq = animSequence.ConvertSequence(skeleton);
-                seq.Name = compositeSection.SectionName.Text;
-                seq.StartPos = segment.StartPos;
-                seq.AnimEndTime = segment.AnimEndTime;
-                seq.LoopingCount = segment.LoopingCount;
-                animSet.Sequences.Add(seq);
+                    var seq = animSequence.ConvertSequence(skeleton);
+                    seq.Name = slotAnimTrack.SlotName.Text;
+                    seq.StartPos = segment.StartPos;
+                    seq.AnimEndTime = segment.AnimEndTime;
+                    seq.LoopingCount = segment.LoopingCount;
+                    animSet.Sequences.Add(seq);
+                }
             }
 
+            // var compositeSection = animMontage.CompositeSections[0];
+            // do
+            // {
+            //     if (compositeSection.LinkedSequence.TryLoad(out UAnimSequence animSequence))
+            //     {
+            //         var segment = animMontage.SlotAnimTracks[compositeSection.SlotIndex].AnimTrack.AnimSegments[compositeSection.SegmentIndex];
+            //         var seq = animSequence.ConvertSequence(skeleton);
+            //         seq.Name = compositeSection.SectionName.Text;
+            //         seq.StartPos = segment.StartPos;
+            //         seq.AnimEndTime = segment.AnimEndTime;
+            //         seq.LoopingCount = segment.LoopingCount;
+            //         animSet.Sequences.Add(seq);
+            //     }
+            //
+            //     compositeSection = animMontage.CompositeSections.FirstOrDefault(x => x.SectionName == compositeSection.NextSectionName);
+            // } while (compositeSection is not null && !compositeSection.NextSectionName.IsNone &&
+            //          compositeSection.SectionName != compositeSection.NextSectionName);
+
+            // foreach (var compositeSection in animMontage.CompositeSections)
+            // {
+            //     var segment = animMontage.SlotAnimTracks[compositeSection.SlotIndex].AnimTrack.AnimSegments[compositeSection.SegmentIndex];
+            //     if (!segment.AnimReference.TryLoad(out UAnimSequence animSequence) || !compositeSection.LinkedSequence.TryLoad(out animSequence))
+            //         continue;
+            //
+            //     var seq = animSequence.ConvertSequence(skeleton);
+            //     seq.Name = compositeSection.SectionName.Text;
+            //     seq.StartPos = segment.StartPos;
+            //     seq.AnimEndTime = segment.AnimEndTime;
+            //     seq.LoopingCount = segment.LoopingCount;
+            //     animSet.Sequences.Add(seq);
+            // }
+
+            animSet.TotalAnimTime = animMontage.CalculateSequenceLength();
             return animSet;
         }
 
@@ -76,7 +112,7 @@ namespace CUE4Parse_Conversion.Animations
 
             // Create CAnimSequence
             animSet.Sequences.Add(animSequence.ConvertSequence(skeleton));
-
+            animSet.TotalAnimTime = animSequence.SequenceLength;
             return animSet;
         }
 
@@ -139,20 +175,30 @@ namespace CUE4Parse_Conversion.Animations
                     var tracksHeader = tracks.GetTracksHeader();
                     var numSamples = (int) tracksHeader.NumSamples;
 
-                    // Prepare buffers of all samples of each transform property for the native code to populate
-                    var posKeys = new FVector[animSeq.Tracks.Capacity * numSamples];
-                    var rotKeys = new FQuat[posKeys.Length];
-                    var scaleKeys = new FVector[rotKeys.Length];
+                    // smh Valo has this set to 1, but it should be 0, right?
+                    if (animSequence.IsValidAdditive()) tracks.SetDefaultScale(0);
 
                     // Let the native code do its job
+                    var atomKeys = new FTransform[animSeq.Tracks.Capacity * numSamples];
                     unsafe
                     {
-                        fixed (FVector* posKeysPtr = posKeys)
-                        fixed (FQuat* rotKeysPtr = rotKeys)
-                        fixed (FVector* scaleKeysPtr = scaleKeys)
+                        fixed (FTransform* refPosePtr = animSeq.RetargetBasePose ?? skeleton.ReferenceSkeleton.FinalRefBonePose)
+                        fixed (FTrackToSkeletonMap* trackToSkeletonMapPtr = animSequence.GetTrackMap())
+                        fixed (FTransform* atomKeysPtr = atomKeys)
                         {
-                            nReadACLData(tracks.Handle, posKeysPtr, rotKeysPtr, scaleKeysPtr);
+                            nReadACLData(tracks.Handle, refPosePtr, trackToSkeletonMapPtr, atomKeysPtr);
                         }
+                    }
+
+                    // Prepare buffers of all samples of each transform property for the native code to populate
+                    var posKeys = new FVector[atomKeys.Length];
+                    var rotKeys = new FQuat[atomKeys.Length];
+                    var scaleKeys = new FVector[atomKeys.Length];
+                    for (var i = 0; i < atomKeys.Length; i++)
+                    {
+                        posKeys[i] = atomKeys[i].Translation;
+                        rotKeys[i] = atomKeys[i].Rotation;
+                        scaleKeys[i] = atomKeys[i].Scale3D;
                     }
 
                     // Now create CAnimTracks with the data from those big buffers
@@ -180,8 +226,9 @@ namespace CUE4Parse_Conversion.Animations
             }
 
             // ok?
+            if (animSequence.IsValidAdditive()) animSeq = animSeq.ConvertAdditive(skeleton);
             AdjustSequenceBySkeleton(skeleton.ReferenceSkeleton, animSeq.RetargetBasePose ?? skeleton.ReferenceSkeleton.FinalRefBonePose, animSeq);
-            return !animSequence.IsValidAdditive() ? animSeq : animSeq.ConvertAdditive(skeleton);
+            return animSeq;
         }
 
         private static CAnimSequence ConvertAdditive(this CAnimSequence animSeq, USkeleton skeleton)
@@ -560,6 +607,6 @@ namespace CUE4Parse_Conversion.Animations
         }
 
         [DllImport(ACLNative.LIB_NAME)]
-        private static extern unsafe void nReadACLData(IntPtr compressedTracks, FVector* outPosKeys, FQuat* outRotKeys, FVector* outScaleKeys);
+        private static extern unsafe void nReadACLData(IntPtr compressedTracks, FTransform* inRefPoses, FTrackToSkeletonMap* inTrackToSkeletonMap, FTransform* outAtom);
     }
 }

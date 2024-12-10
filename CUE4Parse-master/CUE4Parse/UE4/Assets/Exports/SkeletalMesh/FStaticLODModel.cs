@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using CUE4Parse.UE4.Assets.Exports.StaticMesh;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Assets.Readers;
 using CUE4Parse.UE4.Exceptions;
 using CUE4Parse.UE4.Objects.Engine;
 using CUE4Parse.UE4.Objects.Meshes;
+using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse.UE4.Readers;
 using CUE4Parse.UE4.Versions;
 using Newtonsoft.Json;
@@ -20,7 +22,7 @@ namespace CUE4Parse.UE4.Assets.Exports.SkeletalMesh
     [JsonConverter(typeof(FStaticLODModelConverter))]
     public class FStaticLODModel
     {
-        public FSkelMeshSection[] Sections;
+        public FSkelMeshSection[] Sections = [];
         public FMultisizeIndexContainer? Indices;
         public short[] ActiveBoneIndices;
         public FSkelMeshChunk[] Chunks;
@@ -32,10 +34,12 @@ namespace CUE4Parse.UE4.Assets.Exports.SkeletalMesh
         public int MaxImportVertex;
         public int NumTexCoords;
         public FMorphTargetVertexInfoBuffers? MorphTargetVertexInfoBuffers;
+        public Dictionary<FName, FSkeletalMeshAttributeVertexBuffer>? VertexAttributeBuffers;
         public FSkeletalMeshVertexBuffer VertexBufferGPUSkin;
         public FSkeletalMeshVertexColorBuffer ColorVertexBuffer;
         public FMultisizeIndexContainer AdjacencyIndexBuffer;
         public FSkeletalMeshVertexClothBuffer ClothVertexBuffer;
+        public FSkeletalMeshHalfEdgeBuffer HalfEdgeBuffer;
         public bool SkipLod => Indices == null || Indices.Indices16.Length < 1 && Indices.Indices32.Length < 1;
 
         public FStaticLODModel()
@@ -72,7 +76,7 @@ namespace CUE4Parse.UE4.Assets.Exports.SkeletalMesh
             }
 
             Size = Ar.Read<int>();
-            if (!stripDataFlags.IsDataStrippedForServer())
+            if (!stripDataFlags.IsAudioVisualDataStripped())
                 NumVertices = Ar.Read<int>();
 
             RequiredBones = Ar.ReadArray<short>();
@@ -85,7 +89,7 @@ namespace CUE4Parse.UE4.Assets.Exports.SkeletalMesh
                 MaxImportVertex = Ar.Read<int>();
             }
 
-            if (!stripDataFlags.IsDataStrippedForServer())
+            if (!stripDataFlags.IsAudioVisualDataStripped())
             {
                 NumTexCoords = Ar.Read<int>();
                 if (skelMeshVer < FSkeletalMeshCustomVersion.Type.SplitModelAndRenderData)
@@ -210,7 +214,7 @@ namespace CUE4Parse.UE4.Assets.Exports.SkeletalMesh
             var bInlined = Ar.ReadBoolean();
 
             RequiredBones = Ar.ReadArray<short>();
-            if (!stripDataFlags.IsDataStrippedForServer() && !bIsLODCookedOut)
+            if (!stripDataFlags.IsAudioVisualDataStripped() && !bIsLODCookedOut)
             {
                 Sections = new FSkelMeshSection[Ar.Read<int>()];
                 for (var i = 0; i < Sections.Length; i++)
@@ -221,14 +225,17 @@ namespace CUE4Parse.UE4.Assets.Exports.SkeletalMesh
 
                 ActiveBoneIndices = Ar.ReadArray<short>();
 
-                if (Ar.Game == EGame.GAME_KenaBridgeofSpirits)
+                if (Ar.Game is EGame.GAME_KenaBridgeofSpirits)
                     Ar.ReadArray<byte>(); // EAssetType_array1
+                if (Ar.Game is EGame.GAME_FragPunk)
+                    Ar.Read<int>();
 
                 Ar.Position += 4; //var buffersSize = Ar.Read<uint>();
 
                 if (bInlined)
                 {
                     SerializeStreamedData(Ar, bHasVertexColors);
+
                     if (Ar.Game == EGame.GAME_RogueCompany)
                     {
                         Ar.Position += 12; // 1 (Long) + 2^16 (Int)
@@ -237,11 +244,23 @@ namespace CUE4Parse.UE4.Assets.Exports.SkeletalMesh
                         if (elementSize > 0 && elementCount > 0)
                             Ar.SkipBulkArrayData();
                     }
+
+                    if (Ar.Game == EGame.GAME_MortalKombat1 && Ar.ReadBoolean())
+                    {
+                        Ar.SkipBulkArrayData();
+                        Ar.SkipBulkArrayData();
+                        Ar.SkipBulkArrayData();
+                        Ar.SkipBulkArrayData();
+                        Ar.SkipBulkArrayData();
+                        Ar.SkipBulkArrayData();
+                        Ar.SkipBulkArrayData();
+                        Ar.Position += 8;
+                    }
                 }
                 else
                 {
                     var bulk = new FByteBulkData(Ar);
-                    if (bulk.Header.ElementCount > 0)
+                    if (bulk.Header.ElementCount > 0 && bulk.Data != null)
                     {
                         using (var tempAr = new FByteArchive("LodReader", bulk.Data, Ar.Versions))
                         {
@@ -293,7 +312,7 @@ namespace CUE4Parse.UE4.Assets.Exports.SkeletalMesh
             ActiveBoneIndices = Ar.ReadArray<short>();
             RequiredBones = Ar.ReadArray<short>();
 
-            if (!stripDataFlags.IsDataStrippedForServer() && !stripDataFlags.IsClassDataStripped((byte) EClassDataStripFlag.CDSF_MinLodData))
+            if (!stripDataFlags.IsAudioVisualDataStripped() && !stripDataFlags.IsClassDataStripped((byte) EClassDataStripFlag.CDSF_MinLodData))
             {
                 var positionVertexBuffer = new FPositionVertexBuffer(Ar);
                 var staticMeshVertexBuffer = new FStaticMeshVertexBuffer(Ar);
@@ -364,6 +383,11 @@ namespace CUE4Parse.UE4.Assets.Exports.SkeletalMesh
             if (HasClothData())
                 ClothVertexBuffer = new FSkeletalMeshVertexClothBuffer(Ar);
 
+            if (Ar.Game == EGame.GAME_Spectre)
+            {
+                _ = new FMultisizeIndexContainer(Ar);
+            }
+            
             var skinWeightProfilesData = new FSkinWeightProfilesData(Ar);
 
             if (Ar.Versions["SkeletalMesh.HasRayTracingData"])
@@ -377,6 +401,26 @@ namespace CUE4Parse.UE4.Assets.Exports.SkeletalMesh
                 if (bSerializeCompressedMorphTargets)
                 {
                     MorphTargetVertexInfoBuffers = new FMorphTargetVertexInfoBuffers(Ar);
+                }
+            }
+
+            if (FUE5MainStreamObjectVersion.Get(Ar) >= FUE5MainStreamObjectVersion.Type.SkeletalVertexAttributes)
+            {
+                var count = Ar.Read<int>();
+                VertexAttributeBuffers = new Dictionary<FName, FSkeletalMeshAttributeVertexBuffer>(count);
+                for (int i = 0; i < count; i++)
+                {
+                    VertexAttributeBuffers[Ar.ReadFName()] = new FSkeletalMeshAttributeVertexBuffer(Ar);
+                }
+            }
+
+            if (FFortniteMainBranchObjectVersion.Get(Ar) >= FFortniteMainBranchObjectVersion.Type.SkeletalHalfEdgeData)
+            {
+                const byte MeshDeformerStripFlag = 1;
+                var meshDeformerStripFlags = Ar.Read<FStripDataFlags>();
+                if (!meshDeformerStripFlags.IsClassDataStripped(MeshDeformerStripFlag))
+                {
+                    HalfEdgeBuffer = new FSkeletalMeshHalfEdgeBuffer(Ar);
                 }
             }
 
@@ -405,73 +449,6 @@ namespace CUE4Parse.UE4.Assets.Exports.SkeletalMesh
                 if (Sections[i].HasClothData)
                     return true;
             return false;
-        }
-    }
-
-    public class FStaticLODModelConverter : JsonConverter<FStaticLODModel>
-    {
-        public override void WriteJson(JsonWriter writer, FStaticLODModel value, JsonSerializer serializer)
-        {
-            writer.WriteStartObject();
-
-            writer.WritePropertyName("Sections");
-            serializer.Serialize(writer, value.Sections);
-
-            // writer.WritePropertyName("Indices");
-            // serializer.Serialize(writer, value.Indices);
-
-            // writer.WritePropertyName("ActiveBoneIndices");
-            // serializer.Serialize(writer, value.ActiveBoneIndices);
-
-            writer.WritePropertyName("NumVertices");
-            writer.WriteValue(value.NumVertices);
-
-            writer.WritePropertyName("NumTexCoords");
-            writer.WriteValue(value.NumTexCoords);
-
-            // writer.WritePropertyName("RequiredBones");
-            // serializer.Serialize(writer, value.RequiredBones);
-
-            if (value.MorphTargetVertexInfoBuffers != null)
-            {
-                writer.WritePropertyName("MorphTargetVertexInfoBuffers");
-                serializer.Serialize(writer, value.MorphTargetVertexInfoBuffers);
-            }
-
-            writer.WritePropertyName("VertexBufferGPUSkin");
-            serializer.Serialize(writer, value.VertexBufferGPUSkin);
-
-            // writer.WritePropertyName("ColorVertexBuffer");
-            // serializer.Serialize(writer, value.ColorVertexBuffer);
-
-            // writer.WritePropertyName("AdjacencyIndexBuffer");
-            // serializer.Serialize(writer, value.AdjacencyIndexBuffer);
-
-            if (value.Chunks.Length > 0)
-            {
-                writer.WritePropertyName("Chunks");
-                serializer.Serialize(writer, value.Chunks);
-
-                // writer.WritePropertyName("ClothVertexBuffer");
-                // serializer.Serialize(writer, value.ClothVertexBuffer);
-            }
-
-            if (value.MeshToImportVertexMap.Length > 0)
-            {
-                // writer.WritePropertyName("MeshToImportVertexMap");
-                // serializer.Serialize(writer, value.MeshToImportVertexMap);
-
-                writer.WritePropertyName("MaxImportVertex");
-                serializer.Serialize(writer, value.MaxImportVertex);
-            }
-
-            writer.WriteEndObject();
-        }
-
-        public override FStaticLODModel ReadJson(JsonReader reader, Type objectType, FStaticLODModel existingValue, bool hasExistingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
         }
     }
 }

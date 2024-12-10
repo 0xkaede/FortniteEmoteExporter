@@ -1,9 +1,9 @@
-using System;
 using System.Runtime.CompilerServices;
 using CUE4Parse.Compression;
 using CUE4Parse.Encryption.Aes;
 using CUE4Parse.UE4.Objects.Core.Misc;
 using CUE4Parse.UE4.Readers;
+using CUE4Parse.UE4.Versions;
 using CUE4Parse.UE4.VirtualFileSystem;
 using CUE4Parse.Utils;
 using static CUE4Parse.UE4.Objects.Core.Misc.ECompressionFlags;
@@ -21,7 +21,7 @@ namespace CUE4Parse.UE4.Pak.Objects
         public readonly long CompressedSize;
         public readonly long UncompressedSize;
         public sealed override CompressionMethod CompressionMethod { get; }
-        public readonly FPakCompressedBlock[] CompressionBlocks = Array.Empty<FPakCompressedBlock>();
+        public readonly FPakCompressedBlock[] CompressionBlocks = [];
         public readonly uint Flags;
         public override bool IsEncrypted => (Flags & Flag_Encrypted) == Flag_Encrypted;
         public bool IsDeleted => (Flags & Flag_Deleted) == Flag_Deleted;
@@ -66,6 +66,13 @@ namespace CUE4Parse.UE4.Pak.Objects
             CompressedSize = Ar.Read<long>();
             UncompressedSize = Ar.Read<long>();
             Size = UncompressedSize;
+
+            if (Ar.Game == GAME_WildAssault)
+            {
+                Offset = (long) ((ulong) Offset ^ 0xA7CE6A55B275BB25) - 0x7A;
+                CompressedSize = (long) ((ulong) CompressedSize ^ 0xF00DF9C13B6B54B0) - 0xDF;
+                UncompressedSize = (long) ((ulong) UncompressedSize ^ 0x1604EC5A1949330D) - 0x6F;
+            }
 
             if (reader.Info.Version < PakFile_Version_FNameBasedCompressionMethod)
             {
@@ -118,7 +125,7 @@ namespace CUE4Parse.UE4.Pak.Objects
 
                 CompressionMethod = compressionMethodIndex == -1 ? CompressionMethod.Unknown : reader.Info.CompressionMethods[compressionMethodIndex];
             }
-            else if (reader.Info.Version == PakFile_Version_FNameBasedCompressionMethod && !reader.Info.IsSubVersion)
+            else if (reader.Info is { Version: PakFile_Version_FNameBasedCompressionMethod, IsSubVersion: false })
             {
                 CompressionMethod = reader.Info.CompressionMethods[Ar.Read<byte>()];
             }
@@ -130,12 +137,15 @@ namespace CUE4Parse.UE4.Pak.Objects
             if (reader.Info.Version < PakFile_Version_NoTimestamps)
                 Ar.Position += 8; // Timestamp
             Ar.Position += 20; // Hash
+
             if (reader.Info.Version >= PakFile_Version_CompressionEncryption)
             {
                 if (CompressionMethod != CompressionMethod.None)
                     CompressionBlocks = Ar.ReadArray<FPakCompressedBlock>();
-                Flags = (uint)Ar.ReadByte();
+                Flags = (uint) Ar.ReadByte();
                 CompressionBlockSize = Ar.Read<uint>();
+                if (Ar.Game == GAME_WildAssault)
+                    CompressionBlockSize = CompressionBlockSize ^ 0x6431032B - 0x81;
             }
 
             if (Ar.Game == GAME_TEKKEN7) Flags = (uint) (Flags & ~Flag_Encrypted);
@@ -160,7 +170,7 @@ namespace CUE4Parse.UE4.Pak.Objects
             Path = path;
 
             // UE4 reference: FPakFile::DecodePakEntry()
-            uint bitfield = *(uint*) data;
+            var bitfield = *(uint*) data;
             data += sizeof(uint);
 
             uint compressionBlockSize;
@@ -196,6 +206,7 @@ namespace CUE4Parse.UE4.Pak.Objects
             }
 
             if (reader.Ar.Game == GAME_Snowbreak) Offset ^= 0x1F1E1D1C;
+            if (reader.Ar.Game is GAME_QQ or GAME_DreamStar) Offset += 8;
 
             // Read the UncompressedSize.
             var bIsUncompressedSize32BitSafe = (bitfield & (1 << 30)) != 0;
@@ -259,6 +270,15 @@ namespace CUE4Parse.UE4.Pak.Objects
             if (CompressionMethod != CompressionMethod.None)
                 StructSize += (int) (sizeof(int) + compressionBlocksCount * 2 * sizeof(long));
 
+            StructSize += reader.Ar.Game switch
+            {
+                GAME_TorchlightInfinite => 1,
+                GAME_BlackMythWukong => 1,
+                GAME_InfinityNikki => 20,
+                GAME_VisionsofMana => -3,
+                _ => 0
+            };
+
             // Handle building of the CompressionBlocks array.
             if (compressionBlocksCount == 1 && !IsEncrypted)
             {
@@ -278,7 +298,7 @@ namespace CUE4Parse.UE4.Pak.Objects
 
                 // compressedBlockOffset is the starting offset. Everything else can be derived from there.
                 var compressedBlockOffset = Offset + StructSize;
-                for (int compressionBlockIndex = 0; compressionBlockIndex < compressionBlocksCount; ++compressionBlockIndex)
+                for (var compressionBlockIndex = 0; compressionBlockIndex < compressionBlocksCount; ++compressionBlockIndex)
                 {
                     ref var compressedBlock = ref CompressionBlocks[compressionBlockIndex];
                     compressedBlock.CompressedStart = compressedBlockOffset;
@@ -328,5 +348,29 @@ namespace CUE4Parse.UE4.Pak.Objects
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override FArchive CreateReader() => new FByteArchive(Path, Read(), Vfs.Versions);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public FPakEntry(PakFileReader reader, string path, FArchive Ar, EGame game) : base(reader)
+        {
+            Path = path;
+            var startOffset = Ar.Position;
+
+            if (game == GAME_GameForPeace)
+            {
+                Ar.Position += 20;
+                Offset = Ar.Read<long>();
+                UncompressedSize = Ar.Read<long>();
+                CompressionMethod = reader.Info.CompressionMethods[Ar.Read<int>()];
+                CompressedSize = Ar.Read<long>();
+                Size = UncompressedSize;
+                Ar.Position += 21;
+                if (CompressionMethod != CompressionMethod.None)
+                    CompressionBlocks = Ar.ReadArray<FPakCompressedBlock>();
+                CompressionBlockSize = Ar.Read<uint>();
+                Flags = (uint) Ar.ReadByte();
+            }
+
+            StructSize = (int) (Ar.Position - startOffset);
+        }
     }
 }

@@ -1,33 +1,22 @@
 ﻿using CUE4Parse.UE4.Readers;
 using Newtonsoft.Json;
-using System;
 
-namespace CUE4Parse.UE4.Assets.Objects
+namespace CUE4Parse.UE4.Assets.Objects.Properties;
+
+[JsonConverter(typeof(StrPropertyConverter))]
+public class StrProperty : FPropertyTagType<string>
 {
-    [JsonConverter(typeof(StrPropertyConverter))]
-    public class StrProperty : FPropertyTagType<string>
+    public StrProperty(string value)
     {
-        public StrProperty(FArchive Ar, ReadType type)
-        {
-            Value = type switch
-            {
-                ReadType.ZERO => string.Empty,
-                _ => Ar.ReadFString()
-            };
-        }
+        Value = value;
     }
 
-    public class StrPropertyConverter : JsonConverter<StrProperty>
+    public StrProperty(FArchive Ar, ReadType type)
     {
-        public override void WriteJson(JsonWriter writer, StrProperty value, JsonSerializer serializer)
+        Value = type switch
         {
-            writer.WriteValue(value.Value);
-        }
-
-        public override StrProperty ReadJson(JsonReader reader, Type objectType, StrProperty existingValue, bool hasExistingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
-        }
+            ReadType.ZERO => string.Empty,
+            _ => Ar.ReadFString()
+        };
     }
 }

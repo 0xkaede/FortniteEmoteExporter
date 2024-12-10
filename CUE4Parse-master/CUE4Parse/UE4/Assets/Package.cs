@@ -14,11 +14,13 @@ using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse.UE4.Readers;
 using CUE4Parse.UE4.Versions;
 using CUE4Parse.Utils;
+using Newtonsoft.Json;
 using Serilog;
 
 namespace CUE4Parse.UE4.Assets
 {
     [SkipObjectRegistration]
+    [JsonConverter(typeof(PackageConverter))]
     public sealed class Package : AbstractUePackage
     {
         public override FPackageFileSummary Summary { get; }
@@ -115,7 +117,7 @@ namespace CUE4Parse.UE4.Assets
                     export.ExportObject = new Lazy<UObject>(() =>
                     {
                         // Create
-                        var obj = ConstructObject(ResolvePackageIndex(export.ClassIndex)?.Object?.Value as UStruct);
+                        var obj = ConstructObject(ResolvePackageIndex(export.ClassIndex)?.Object?.Value as UStruct, this, (EObjectFlags) export.ObjectFlags);
                         obj.Name = export.ObjectName.Text;
                         obj.Outer = (ResolvePackageIndex(export.OuterIndex) as ResolvedExportObject)?.Object.Value ?? this;
                         obj.Super = ResolvePackageIndex(export.SuperIndex) as ResolvedExportObject;
@@ -273,7 +275,13 @@ namespace CUE4Parse.UE4.Assets
             public override FName Name => _import.ObjectName;
             public override ResolvedObject? Outer => Package.ResolvePackageIndex(_import.OuterIndex);
             public override ResolvedObject Class => new ResolvedLoadedObject(new UScriptClass(_import.ClassName.Text));
-            public override Lazy<UObject>? Object => _import.ClassName.Text == "Class" ? new(() => new UScriptClass(Name.Text)) : null;
+            public override Lazy<UObject>? Object => _import.ClassName.Text switch
+            {
+                "Class" => new(() => new UScriptClass(Name.Text)),
+                "SharpClass" => new(() => new USharpClass(Name.Text)),
+                "PythonClass" => new(() => new UPythonClass(Name.Text)),
+                _ => null
+            };
         }
 
         private class ExportLoader
@@ -381,7 +389,7 @@ namespace CUE4Parse.UE4.Assets
             {
                 Trace.Assert(_phase == LoadPhase.Create);
                 _phase = LoadPhase.Serialize;
-                _object = ConstructObject(_package.ResolvePackageIndex(_export.ClassIndex)?.Object?.Value as UStruct);
+                _object = ConstructObject(_package.ResolvePackageIndex(_export.ClassIndex)?.Object?.Value as UStruct, _package, (EObjectFlags) _export.ObjectFlags);
                 _object.Name = _export.ObjectName.Text;
                 if (!_export.OuterIndex.IsNull)
                 {

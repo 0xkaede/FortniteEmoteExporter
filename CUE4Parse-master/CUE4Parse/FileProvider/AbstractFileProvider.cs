@@ -15,10 +15,12 @@ using CUE4Parse.UE4.Assets.Exports.Internationalization;
 using CUE4Parse.UE4.Exceptions;
 using CUE4Parse.UE4.IO.Objects;
 using CUE4Parse.UE4.Localization;
+using CUE4Parse.UE4.Objects.Core.Misc;
 using CUE4Parse.UE4.Pak.Objects;
 using CUE4Parse.UE4.Plugins;
 using CUE4Parse.UE4.Readers;
 using CUE4Parse.UE4.Versions;
+using CUE4Parse.UE4.VirtualFileSystem;
 using CUE4Parse.Utils;
 using Newtonsoft.Json;
 using Serilog;
@@ -26,13 +28,20 @@ using UE4Config.Parsing;
 
 namespace CUE4Parse.FileProvider
 {
+    public class CustomConfigIni : ConfigIni
+    {
+        public FGuid EncryptionKeyGuid { get; set; }
+
+        public CustomConfigIni(string name) : base(name) { }
+    }
+
     public abstract class AbstractFileProvider : IFileProvider
     {
         protected static readonly ILogger Log = Serilog.Log.ForContext<IFileProvider>();
 
         public VersionContainer Versions { get; set; }
-        public ConfigIni DefaultGame { get; set; }
-        public ConfigIni DefaultEngine { get; set; }
+        public CustomConfigIni DefaultGame { get; set; }
+        public CustomConfigIni DefaultEngine { get; set; }
         public virtual ITypeMappingsProvider? MappingsContainer { get; set; }
         public virtual TypeMappings? MappingsForGame => MappingsContainer?.MappingsForGame;
         public virtual IDictionary<string, IDictionary<string, string>> LocalizedResources { get; } = new Dictionary<string, IDictionary<string, string>>();
@@ -41,14 +50,16 @@ namespace CUE4Parse.FileProvider
         public abstract IReadOnlyDictionary<FPackageId, GameFile> FilesById { get; }
         public virtual bool IsCaseInsensitive { get; } // fabian? is this reversed?
         public bool ReadScriptData { get; set; }
+        public bool ReadShaderMaps { get; set; }
+        public bool SkipReferencedTextures { get; set; }
         public bool UseLazySerialization { get; set; } = true;
 
         protected AbstractFileProvider(bool isCaseInsensitive = false, VersionContainer? versions = null)
         {
             IsCaseInsensitive = isCaseInsensitive;
             Versions = versions ?? VersionContainer.DEFAULT_VERSION_CONTAINER;
-            DefaultGame = new ConfigIni(nameof(DefaultGame));
-            DefaultEngine = new ConfigIni(nameof(DefaultEngine));
+            DefaultGame = new CustomConfigIni(nameof(DefaultGame));
+            DefaultEngine = new CustomConfigIni(nameof(DefaultEngine));
         }
 
         private string? _gameDisplayName;
@@ -73,16 +84,22 @@ namespace CUE4Parse.FileProvider
                                 if (stringTable != null)
                                 {
                                     var keyName = g.Value.SubstringAfterLast(", \"").SubstringBeforeLast("\")"); // LOCTABLE("/Game/Narrative/LocalisedStrings/UI_Strings.UI_Strings", "23138_ui_pc_game_name_titlebar")
-                                    var stringTableEntry = stringTable.StringTable.KeysToMetaData;
+                                    var stringTableEntry = stringTable.StringTable.KeysToEntries;
                                     if (stringTableEntry.TryGetValue(keyName, out var value))
                                     {
                                         _gameDisplayName = value;
                                     }
                                 }
                             }
-                            else
+                            else if (!string.IsNullOrWhiteSpace(g.Value) && g.Value != "{GameName}")
                             {
                                 _gameDisplayName = g.Value;
+                            }
+                            else
+                            {
+                                inst.Clear();
+                                DefaultGame.FindPropertyInstructions("/Script/EngineSettings.GeneralProjectSettings", "ProjectName", inst);
+                                if (inst.Count > 0) _gameDisplayName = inst[0].Value;
                             }
                         }
                     }
@@ -96,15 +113,19 @@ namespace CUE4Parse.FileProvider
             }
         }
 
-        private string _internalGameName;
-        public virtual string InternalGameName
+        private string? _internalGameName;
+        public string InternalGameName
         {
             get
             {
                 if (string.IsNullOrEmpty(_internalGameName))
                 {
-                    string t = Files.Keys.FirstOrDefault(it => !it.SubstringBefore('/').EndsWith("engine", StringComparison.OrdinalIgnoreCase) && !it.StartsWith('/') && it.Contains('/')) ?? string.Empty;
+                    if (Files.Keys.FirstOrDefault(it => it.EndsWith(".uproject", StringComparison.OrdinalIgnoreCase)) is not { } t)
+                        t = Files.Keys.FirstOrDefault(
+                            it => !it.StartsWith('/') && it.Contains('/') &&
+                                  !it.SubstringBefore('/').EndsWith("Engine", StringComparison.OrdinalIgnoreCase)) ?? string.Empty;
                     _internalGameName = t.SubstringBefore('/');
+                    if (_internalGameName == "midnightsuns") _internalGameName = "codagame";
                 }
                 return _internalGameName;
             }
@@ -341,29 +362,36 @@ namespace CUE4Parse.FileProvider
             return i;
         }
 
-        public void LoadIniConfigs()
+        protected bool LoadIniConfigs()
         {
-            if (TryFindGameFile("/Game/Config/DefaultGame.ini", out var defaultGame) && defaultGame.TryCreateReader(out var gameAr))
+            if (TryFindGameFile("/Game/Config/DefaultGame.ini", out var defaultGame))
             {
-                DefaultGame.Read(new StreamReader(gameAr));
-                gameAr.Dispose();
+                if (defaultGame is VfsEntry { Vfs: IAesVfsReader aesVfsReader }) DefaultGame.EncryptionKeyGuid = aesVfsReader.EncryptionKeyGuid;
+                if (defaultGame.TryCreateReader(out var gameAr)) DefaultGame.Read(new StreamReader(gameAr));
+                gameAr?.Dispose();
             }
-            if (TryFindGameFile("/Game/Config/DefaultEngine.ini", out var defaultEngine) && defaultEngine.TryCreateReader(out var engineAr))
+            if (TryFindGameFile("/Game/Config/DefaultEngine.ini", out var defaultEngine))
             {
-                DefaultEngine.Read(new StreamReader(engineAr));
-                // foreach (ConfigIniSection section in DefaultEngine.Sections)
-                // {
-                //     if (section.Name != "ConsoleVariables") continue;
-                //     foreach (var iniToken in section.Tokens)
-                //     {
-                //         if (iniToken is not InstructionToken token ||
-                //             token.Value.Trim() is not "1" or "0")
-                //             continue;
-                //         Versions.Options[token.Key.Trim()] = int.Parse(token.Value.Trim()) == 1;
-                //     }
-                // }
-                engineAr.Dispose();
+                if (defaultEngine is VfsEntry { Vfs: IAesVfsReader aesVfsReader }) DefaultEngine.EncryptionKeyGuid = aesVfsReader.EncryptionKeyGuid;
+                if (defaultEngine.TryCreateReader(out var engineAr)) DefaultEngine.Read(new StreamReader(engineAr));
+                engineAr?.Dispose();
+
+                foreach (var token in DefaultEngine.Sections.FirstOrDefault(s => s.Name == "ConsoleVariables")?.Tokens ?? [])
+                {
+                    if (token is not InstructionToken it) continue;
+                    var boolValue = it.Value.Equals("1");
+
+                    switch (it.Key)
+                    {
+                        case "a.StripAdditiveRefPose":
+                        case "r.StaticMesh.KeepMobileMinLODSettingOnDesktop":
+                        case "r.SkeletalMesh.KeepMobileMinLODSettingOnDesktop":
+                            Versions[it.Key[2..]] = boolValue;
+                            continue;
+                    }
+                }
             }
+            return DefaultGame.Sections.Any(x => x.Name == "/Script/EngineSettings.GeneralProjectSettings");
         }
 
         public virtual GameFile this[string path] => Files[FixPath(path)];
@@ -398,46 +426,38 @@ namespace CUE4Parse.FileProvider
             if (path[^1] != '/' && !lastPart.Contains('.'))
                 path += "." + GameFile.Ue4PackageExtensions[0];
 
+            var ret = path;
             var root = path.SubstringBefore('/');
-            if (root.Equals(InternalGameName, StringComparison.OrdinalIgnoreCase))
-            {
-                return comparisonType == StringComparison.OrdinalIgnoreCase ? path.ToLowerInvariant() : path;
-            }
-
+            var tree = path.SubstringAfter('/');
             if (root.Equals("Game", comparisonType) || root.Equals("Engine", comparisonType))
             {
                 var gameName = root.Equals("Engine", comparisonType) ? "Engine" : InternalGameName;
-                var p = path.SubstringAfter('/').SubstringBefore('/');
-                if (p.Contains('.'))
+                var root2 = tree.SubstringBefore('/');
+                if (root2.Equals("Config", comparisonType) ||
+                    root2.Equals("Content", comparisonType) ||
+                    root2.Equals("Plugins", comparisonType))
                 {
-                    var ret = string.Concat(gameName, "/Content/", path.SubstringAfter('/'));
-                    return comparisonType == StringComparison.OrdinalIgnoreCase ? ret.ToLowerInvariant() : ret;
-                }
-
-                if (p.Equals("Config", comparisonType) ||
-                    p.Equals("Content", comparisonType) ||
-                    p.Equals("Plugins", comparisonType))
-                {
-                    var ret = string.Concat(gameName, '/', path.SubstringAfter('/'));
-                    return comparisonType == StringComparison.OrdinalIgnoreCase ? ret.ToLowerInvariant() : ret;
+                    ret = string.Concat(gameName, '/', tree);
                 }
                 else
                 {
-                    var ret = string.Concat(gameName, "/Content/", path.SubstringAfter('/'));
-                    return comparisonType == StringComparison.OrdinalIgnoreCase ? ret.ToLowerInvariant() : ret;
+                    ret = string.Concat(gameName, "/Content/", tree);
                 }
             }
+            else if (root.Equals(InternalGameName, StringComparison.OrdinalIgnoreCase))
+            {
+                // everything should be good
+            }
+            else if (VirtualPaths.TryGetValue(root, out var use))
+            {
+                ret = string.Concat(use, "/Content/", tree);
+            }
+            else if (InternalGameName.Equals("FORTNITEGAME", StringComparison.OrdinalIgnoreCase))
+            {
+                ret = string.Concat(InternalGameName, $"/Plugins/GameFeatures/{root}/Content/", tree);
+            }
 
-            if (VirtualPaths.TryGetValue(root, out var use))
-            {
-                var ret = string.Concat(use, "/Content/", path.SubstringAfter('/'));
-                return comparisonType == StringComparison.OrdinalIgnoreCase ? ret.ToLowerInvariant() : ret;
-            }
-            else
-            {
-                var ret = string.Concat(InternalGameName, $"/Plugins/{(InternalGameName.ToLowerInvariant().Equals("fortnitegame") ? "GameFeatures/" : "")}{root}/Content/", path.SubstringAfter('/'));
-                return comparisonType == StringComparison.OrdinalIgnoreCase ? ret.ToLowerInvariant() : ret;
-            }
+            return comparisonType == StringComparison.OrdinalIgnoreCase ? ret.ToLowerInvariant() : ret;
         }
 
         #region SaveAsset Methods
@@ -781,27 +801,14 @@ namespace CUE4Parse.FileProvider
             await TryLoadObjectAsync(objectPath) as T;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public virtual IEnumerable<UObject> LoadAllObjects(string? packagePath)
+        public virtual IEnumerable<UObject> LoadAllObjects(string? packagePath) => LoadAllObjectsAsync(packagePath).GetAwaiter().GetResult();
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public virtual async Task<IEnumerable<UObject>> LoadAllObjectsAsync(string? packagePath)
         {
             if (packagePath == null) throw new ArgumentException("PackagePath can't be null", nameof(packagePath));
 
-            var pkg = LoadPackage(packagePath);
-            // if (pkg is IoPackage ioPackage && TryLoadPackage(packagePath.Replace(".uasset", ".o.uasset"), out var oPackage) &&
-            //     oPackage is IoPackage segmentPackage)
-            // {
-            //     for (int i = 0; i < segmentPackage.ExportMap.Length; i++)
-            //     {
-            //         if (ioPackage.ExportMap.Any(x => x.ObjectName == segmentPackage.ExportMap[i].ObjectName))
-            //         {
-            //             ioPackage.ExportsLazy[i].Value.Properties.AddRange(segmentPackage.ExportsLazy[i].Value.Properties);
-            //         }
-            //         else
-            //         {
-            //             ioPackage.ExportsLazy.Add(segmentPackage.ExportsLazy[i]);
-            //         }
-            //     }
-            // }
-
+            var pkg = await LoadPackageAsync(packagePath);
             return pkg.GetExports();
         }
 

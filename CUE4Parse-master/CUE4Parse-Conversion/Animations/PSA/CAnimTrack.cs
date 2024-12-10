@@ -32,7 +32,7 @@ namespace CUE4Parse_Conversion.Animations.PSA
         public void GetBoneTransform(float frame, int frameCount, ref FQuat dstQuat, ref FVector dstPos, ref FVector dstScale)
         {
             // fast case: 1 frame only
-            if (KeyTime.Length == 1 || frameCount == 1 || frame == 0)
+            if (KeyTime.Length == 1 || frameCount == 1 || frame == 0.0f)
             {
                 if (KeyQuat.Length > 0) dstQuat = KeyQuat[0];
                 if (KeyPos.Length > 0) dstPos = KeyPos[0];
@@ -75,18 +75,58 @@ namespace CUE4Parse_Conversion.Animations.PSA
                 GetKeyParams(KeyScaleTime, frame, frameCount, scaKeysCount, out scaX, out scaY, out scaF);
             }
 
-            if (rotF > 0) dstQuat = FQuat.Slerp(KeyQuat[rotX], KeyQuat[rotY], rotF);
+            if (rotF > 0.0f) dstQuat = FQuat.Slerp(KeyQuat[rotX], KeyQuat[rotY], rotF);
             else if (rotKeysCount > 0) dstQuat = KeyQuat[rotX];
 
-            if (posF > 0) dstPos = MathUtils.Lerp(KeyPos[posX], KeyPos[posY], posF);
+            if (posF > 0.0f) dstPos = MathUtils.Lerp(KeyPos[posX], KeyPos[posY], posF);
             else if (posKeysCount > 0) dstPos = KeyPos[posX];
 
-            if (scaF > 0) dstScale = MathUtils.Lerp(KeyScale[scaX], KeyScale[scaY], scaF);
+            if (scaF > 0.0f) dstScale = MathUtils.Lerp(KeyScale[scaX], KeyScale[scaY], scaF);
             else if (scaKeysCount > 0) dstScale = KeyScale[scaX];
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool HasKeys() => KeyQuat.Length + KeyPos.Length + KeyScale.Length > 0;
+
+        // In:  KeyTime, Frame, NumFrames, Loop
+        // Out: X - previous key index, Y - next key index, F - fraction between keys
+        private static void GetKeyParams(float[] keyTime, float frame, int frameCount, int keyCount, out int x, out int y, out float f)
+        {
+            if (keyTime.Length > 0) GetKeyParamsInternal(keyTime, frame, out x, out y, out f);
+            else if (keyCount > 1)
+            {
+                var position = frame / frameCount * keyCount;
+                x = position.FloorToInt();
+                f = position - x;
+                y = x + 1;
+                if (y >= keyCount)
+                {
+                    y = keyCount - 1;
+                    f = 0.0f;
+                }
+            }
+            else Reset(out x, out y, out f);
+        }
+
+        // In:  KeyTime, Frame, NumFrames, Loop
+        // Out: X - previous key index, Y - next key index, F - fraction between keys
+        private static void GetKeyParamsInternal(float[] keyTime, float frame, out int x, out int y, out float f)
+        {
+            x = FindTimeKey(keyTime, frame);
+
+            y = x + 1;
+            var numTimeKeys = keyTime.Length;
+            if (y >= numTimeKeys)
+            {
+                y = numTimeKeys - 1;
+                Trace.Assert(x == y);
+                f = 0.0f;
+            }
+            else
+            {
+                f = (frame - keyTime[x]) / (keyTime[y] - keyTime[x]);
+            }
+        }
 
         /// <summary>
         /// find index in time key array
@@ -110,7 +150,7 @@ namespace CUE4Parse_Conversion.Animations.PSA
             for (i = low; i <= high; i++)
             {
                 var currKeyTime = keyTime[i];
-                if (frame == currKeyTime) // exact key
+                if (UnrealMath.IsNearlyEqual(frame, currKeyTime)) // exact key
                     return i;
                 if (frame < currKeyTime) // previous key
                     return i > 0 ? i - 1 : 0;
@@ -120,50 +160,10 @@ namespace CUE4Parse_Conversion.Animations.PSA
             return i;
         }
 
-        // In:  KeyTime, Frame, NumFrames, Loop
-        // Out: X - previous key index, Y - next key index, F - fraction between keys
-        private static void GetKeyParams(float[] keyTime, float frame, int frameCount, int keyCount, out int x, out int y, out float f)
-        {
-            if (keyTime.Length > 0) GetKeyParamsInternal(keyTime, frame, out x, out y, out f);
-            else if (keyCount > 1)
-            {
-                var position = frame / frameCount * keyCount;
-                x = position.FloorToInt();
-                f = position - x;
-                y = x + 1;
-                if (y >= keyCount)
-                {
-                    y = keyCount - 1;
-                    f = 0;
-                }
-            }
-            else Reset(out x, out y, out f);
-        }
-
-        // In:  KeyTime, Frame, NumFrames, Loop
-        // Out: X - previous key index, Y - next key index, F - fraction between keys
-        private static void GetKeyParamsInternal(float[] keyTime, float frame, out int x, out int y, out float f)
-        {
-            x = FindTimeKey(keyTime, frame);
-
-            y = x + 1;
-            var numTimeKeys = keyTime.Length;
-            if (y >= numTimeKeys)
-            {
-                y = numTimeKeys - 1;
-                Trace.Assert(x == y);
-                f = 0;
-            }
-            else
-            {
-                f = (frame - keyTime[x]) / (keyTime[y] - keyTime[x]);
-            }
-        }
-
         private static void Reset(out int x, out int y, out float f)
         {
             x = y = 0;
-            f = 0;
+            f = 0.0f;
         }
     }
 }

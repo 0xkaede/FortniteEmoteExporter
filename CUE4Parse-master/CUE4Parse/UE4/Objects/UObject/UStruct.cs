@@ -20,6 +20,7 @@ namespace CUE4Parse.UE4.Objects.UObject
         public override void Deserialize(FAssetArchive Ar, long validPos)
         {
             base.Deserialize(Ar, validPos);
+
             SuperStruct = new FPackageIndex(Ar);
             if (FFrameworkObjectVersion.Get(Ar) < FFrameworkObjectVersion.Type.RemoveUField_Next)
             {
@@ -75,7 +76,7 @@ namespace CUE4Parse.UE4.Objects.UObject
         }
 
         // ignore inner properties and return main one
-        public bool GetProperty(FName name, out FField? property) 
+        public bool GetProperty(FName name, out FField? property)
         {
             property = null;
             if (ChildProperties is null) return false;
@@ -96,7 +97,7 @@ namespace CUE4Parse.UE4.Objects.UObject
         {
             base.WriteJson(writer, serializer);
 
-            if (SuperStruct is { IsNull: false })
+            if (SuperStruct is { IsNull: false } && (!SuperStruct.ResolvedObject?.Equals(Super) ?? false))
             {
                 writer.WritePropertyName("SuperStruct");
                 serializer.Serialize(writer, SuperStruct);

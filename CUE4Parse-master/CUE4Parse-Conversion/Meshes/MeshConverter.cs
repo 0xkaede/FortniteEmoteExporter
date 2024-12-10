@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using CUE4Parse.UE4.Assets.Exports.Animation;
 using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
 using CUE4Parse.UE4.Assets.Exports.StaticMesh;
@@ -13,9 +14,10 @@ namespace CUE4Parse_Conversion.Meshes
 {
     public static class MeshConverter
     {
-        public static bool TryConvert(this USkeleton originalSkeleton, out List<CSkelMeshBone> bones)
+        public static bool TryConvert(this USkeleton originalSkeleton, out List<CSkelMeshBone> bones, out FBox box)
         {
             bones = new List<CSkelMeshBone>();
+            box = new FBox();
             for (var i = 0; i < originalSkeleton.ReferenceSkeleton.FinalRefBoneInfo.Length; i++)
             {
                 var skeletalMeshBone = new CSkelMeshBone
@@ -30,6 +32,8 @@ namespace CUE4Parse_Conversion.Meshes
                 //     skeletalMeshBone.Orientation.Conjugate();
 
                 bones.Add(skeletalMeshBone);
+                box.Min = skeletalMeshBone.Position.ComponentMin(box.Min);
+                box.Max = skeletalMeshBone.Position.ComponentMax(box.Max);
             }
             return true;
         }
@@ -262,21 +266,14 @@ namespace CUE4Parse_Conversion.Meshes
                         skeletalMeshLod.VertexColors[vert] = srcLod.ColorVertexBuffer.Data[vert];
                     }
 
-                    var i2 = 0;
-                    uint packedWeights = 0;
-                    var len = Math.Min(v.Infs.BoneWeight.Length, 4);
-                    for (var j = 0; j < len; j++)
+                    foreach (var (weight, boneIndex) in v.Infs.BoneWeight.Zip(v.Infs.BoneIndex))
                     {
-                        uint boneWeight = v.Infs.BoneWeight[j];
-                        if (boneWeight == 0) continue; // skip this influence (but do not stop the loop!)
-
-                        packedWeights |= boneWeight << (i2 * 8);
-                        skeletalMeshLod.Verts[vert].Bone[i2] = (short) boneMap[v.Infs.BoneIndex[j]];
-                        i2++;
+                        if (weight != 0)
+                        {
+                            var bone = (short)boneMap[boneIndex];
+                            skeletalMeshLod.Verts[vert].AddInfluence(bone, weight);
+                        }
                     }
-
-                    skeletalMeshLod.Verts[vert].PackedWeights = packedWeights;
-                    if (i2 < 4) skeletalMeshLod.Verts[vert].Bone[i2] = -1; // mark end of list
                 }
 
                 convertedMesh.LODs.Add(skeletalMeshLod);

@@ -14,11 +14,13 @@ using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse.UE4.Readers;
 using CUE4Parse.UE4.Versions;
 using CUE4Parse.Utils;
+using Newtonsoft.Json;
 using Serilog;
 
 namespace CUE4Parse.UE4.Assets
 {
     [SkipObjectRegistration]
+    [JsonConverter(typeof(IoPackageConverter))]
     public sealed class IoPackage : AbstractUePackage
     {
         public readonly IoGlobalData GlobalData;
@@ -56,8 +58,11 @@ namespace CUE4Parse.UE4.Assets
                 {
                     PackageFlags = summary.PackageFlags,
                     TotalHeaderSize = summary.GraphDataOffset + (int) summary.HeaderSize,
+                    NameOffset = (int) uassetAr.Position,
                     ExportCount = (summary.ExportBundleEntriesOffset - summary.ExportMapOffset) / FExportMapEntry.Size,
-                    ImportCount = (summary.ExportMapOffset - summary.ImportMapOffset) / FPackageObjectIndex.Size
+                    ExportOffset = summary.ExportMapOffset,
+                    ImportCount = (summary.ExportMapOffset - summary.ImportMapOffset) / FPackageObjectIndex.Size,
+                    ImportOffset = summary.ImportMapOffset,
                 };
 
                 // Versioning info
@@ -107,10 +112,16 @@ namespace CUE4Parse.UE4.Assets
                     }
                 }
 
-                BulkDataMap = Array.Empty<FBulkDataMapEntry>();
-                if (uassetAr.Ver >= EUnrealEngineObjectUE5Version.DATA_RESOURCES)
+                BulkDataMap = [];
+                if (uassetAr.Ver >= EUnrealEngineObjectUE5Version.DATA_RESOURCES || uassetAr.Game == EGame.GAME_TheFirstDescendant)
                 {
-                    var bulkDataMapSize = uassetAr.Read<ulong>();
+                    if (uassetAr.Game >= EGame.GAME_UE5_4)
+                    {
+                        var pad = uassetAr.Read<ulong>(); // pad
+                        _ = uassetAr.ReadArray<byte>((int) pad);
+                    }
+
+                    var bulkDataMapSize = uassetAr.Read<long>();
                     BulkDataMap = uassetAr.ReadArray<FBulkDataMapEntry>((int) (bulkDataMapSize / FBulkDataMapEntry.Size));
                 }
 
@@ -155,8 +166,11 @@ namespace CUE4Parse.UE4.Assets
                     PackageFlags = summary.PackageFlags,
                     TotalHeaderSize = summary.GraphDataOffset + summary.GraphDataSize,
                     NameCount = summary.NameMapHashesSize / sizeof(ulong) - 1,
+                    NameOffset = summary.NameMapNamesOffset,
                     ExportCount = (summary.ExportBundlesOffset - summary.ExportMapOffset) / FExportMapEntry.Size,
+                    ExportOffset = summary.ExportMapOffset,
                     ImportCount = (summary.ExportMapOffset - summary.ImportMapOffset) / FPackageObjectIndex.Size,
+                    ImportOffset = summary.ImportMapOffset,
                     bUnversioned = true
                 };
 
@@ -214,7 +228,7 @@ namespace CUE4Parse.UE4.Assets
                 ExportsLazy[entry.LocalExportIndex] = new Lazy<UObject>(() =>
                 {
                     // Create
-                    var obj = ConstructObject(ResolveObjectIndex(export.ClassIndex)?.Object?.Value as UStruct);
+                    var obj = ConstructObject(ResolveObjectIndex(export.ClassIndex)?.Object?.Value as UStruct, this, export.ObjectFlags);
                     obj.Name = CreateFNameFromMappedName(export.ObjectName).Text;
                     obj.Outer = (ResolveObjectIndex(export.OuterIndex) as ResolvedExportObject)?.ExportObject.Value ?? this;
                     obj.Super = ResolveObjectIndex(export.SuperIndex) as ResolvedExportObject;
@@ -236,9 +250,9 @@ namespace CUE4Parse.UE4.Assets
 
             if (exportBundleHeaders != null) // 4.26 - 5.2
             {
+                var currentExportDataOffset = allExportDataOffset;
                 foreach (var exportBundle in exportBundleHeaders)
                 {
-                    var currentExportDataOffset = allExportDataOffset;
                     for (var i = 0u; i < exportBundle.EntryCount; i++)
                     {
                         currentExportDataOffset += ProcessEntry(exportBundleEntries[exportBundle.FirstEntryIndex + i], currentExportDataOffset, false);

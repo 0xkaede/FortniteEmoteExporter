@@ -12,7 +12,7 @@ namespace CUE4Parse.FileProvider.Objects
     public abstract class GameFile
     {
         public static readonly string[] Ue4PackageExtensions = { "uasset", "umap" };
-        public static readonly string[] Ue4KnownExtensions = { "uasset", "umap", "uexp", "ubulk", "uptnl" };
+        public static readonly string[] Ue4KnownExtensions = { "uasset", "umap", "uexp", "ubulk", "uptnl", "bin", "ini","uplugin", "upluginmanifest", "LOCRES" };
 
         protected GameFile() { }
         protected GameFile(string path, long size)
@@ -54,7 +54,7 @@ namespace CUE4Parse.FileProvider.Objects
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public virtual bool TryCreateReader(out FArchive reader)
+        public virtual bool TryCreateReader(out FArchive? reader)
         {
             try
             {

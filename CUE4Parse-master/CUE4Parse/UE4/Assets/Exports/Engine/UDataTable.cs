@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Assets.Readers;
@@ -18,7 +18,12 @@ namespace CUE4Parse.UE4.Assets.Exports.Engine
             // UObject Properties
 
             UStruct? rowStruct = null;
-            if (string.IsNullOrEmpty(RowStructName)) rowStruct = GetOrDefault<FPackageIndex>("RowStruct").Load<UStruct>(); // type of the RowMap values
+            if (string.IsNullOrEmpty(RowStructName))
+            {
+                var ptr = GetOrDefault<FPackageIndex>("RowStruct");
+                if (ptr is not null && !ptr.TryLoad<UStruct>(out rowStruct))
+                    RowStructName = ptr.Name;
+            }
 
             var numRows = Ar.Read<int>();
             RowMap = new Dictionary<FName, FStructFallback>(numRows);

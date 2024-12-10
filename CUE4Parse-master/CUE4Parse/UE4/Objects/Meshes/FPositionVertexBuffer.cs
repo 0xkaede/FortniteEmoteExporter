@@ -1,4 +1,3 @@
-using System;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Readers;
 using CUE4Parse.UE4.Versions;
@@ -15,48 +14,32 @@ namespace CUE4Parse.UE4.Objects.Meshes
 
         public FPositionVertexBuffer(FArchive Ar)
         {
+            if (Ar.Game is EGame.GAME_Undawn or EGame.GAME_RacingMaster)
+            {
+                bool bUseFullPrecisionPositions = Ar.Game == EGame.GAME_Undawn && Ar.ReadBoolean();
+                Stride = Ar.Read<int>();
+                NumVertices = Ar.Read<int>();
+                bUseFullPrecisionPositions = Ar.Game == EGame.GAME_RacingMaster && Stride == 12;
+                Verts = bUseFullPrecisionPositions ? Ar.ReadBulkArray<FVector>() : Ar.ReadBulkArray<FVector>(() => Ar.Read<FVector3UnsignedShort>());
+                return;
+            }
             Stride = Ar.Read<int>();
             NumVertices = Ar.Read<int>();
             if (Ar.Game == EGame.GAME_Valorant)
             {
                 bool bUseFullPrecisionPositions = Ar.ReadBoolean();
-                _ = new FBoxSphereBounds(Ar);
+                var bounds = new FBoxSphereBounds(Ar);
                 if (!bUseFullPrecisionPositions)
                 {
-                    var vertsHalf = Ar.ReadBulkArray<FVector4Half>();
+                    var vertsHalf = Ar.ReadBulkArray<FVector3SignedShortScale>();
                     Verts = new FVector[vertsHalf.Length];
                     for (int i = 0; i < vertsHalf.Length; i++)
-                        Verts[i] = vertsHalf[i]; // W appears to be all zeros (alignment?), simply dropping
+                        Verts[i] = vertsHalf[i] * bounds.BoxExtent + bounds.Origin;
                     return;
                 }
             }
             if (Ar.Game == EGame.GAME_Gollum) Ar.Position += 25;
-            Verts = Ar.ReadBulkArray<FVector>();
-        }
-    }
-
-    public class FPositionVertexBufferConverter : JsonConverter<FPositionVertexBuffer>
-    {
-        public override void WriteJson(JsonWriter writer, FPositionVertexBuffer value, JsonSerializer serializer)
-        {
-            writer.WriteStartObject();
-
-            // writer.WritePropertyName("Verts");
-            // serializer.Serialize(writer, value.Verts);
-
-            writer.WritePropertyName("Stride");
-            writer.WriteValue(value.Stride);
-
-            writer.WritePropertyName("NumVertices");
-            writer.WriteValue(value.NumVertices);
-
-            writer.WriteEndObject();
-        }
-
-        public override FPositionVertexBuffer ReadJson(JsonReader reader, Type objectType, FPositionVertexBuffer existingValue, bool hasExistingValue,
-            JsonSerializer serializer)
-        {
-            throw new NotImplementedException();
+            Verts = Ar.ReadBulkArray<FVector>();           
         }
     }
 }
