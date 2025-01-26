@@ -353,6 +353,7 @@ namespace AnimationExport.Utils
                 UseShellExecute = false,
                 CreateNoWindow = true
             });
+
             binkadecProcess?.WaitForExit(5000);
         }
 
