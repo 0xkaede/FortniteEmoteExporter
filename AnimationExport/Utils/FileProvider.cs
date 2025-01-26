@@ -319,16 +319,9 @@ namespace AnimationExport.Utils
 
                             Directory.CreateDirectory(MiscPath());
 
-                            await File.WriteAllBytesAsync($"{MiscPath()}\\{musicBoom.Name}.ogg", data);
+                            await File.WriteAllBytesAsync($"{MiscPath()}\\{musicBoom.Name}.blinka", data);
 
-                            var audioInputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}.ogg", FileMode.Open);
-                            await using var audioOutputStream = File.Open($"{MiscPath()}\\{musicBoom.Name}_FIXED.wav", FileMode.OpenOrCreate);
-
-                            FFMpegArguments
-                                .FromPipeInput(new StreamPipeSource(audioInputStream))
-                                .OutputToPipe(new StreamPipeSink(audioOutputStream), options =>
-                                    options.ForceFormat("wav"))
-                                .ProcessSynchronously();
+                            await FixSound($"{MiscPath()}\\{musicBoom.Name}.blinka");
 
                             Logger.Log($"Exported {musicBoom.Name}", LogLevel.Cue4);
                         }
@@ -339,6 +332,28 @@ namespace AnimationExport.Utils
             }
             else
                 Logger.Log("Error Getting FAnimNotifyEvent", LogLevel.Error);
+        }
+
+        private static async Task FixSound(string path)
+        {
+            if(!File.Exists(Constants.BlinkaExe))
+            {
+                var bytes = await new HttpClient().GetByteArrayAsync($"https://cdn.0xkaede.xyz/binkadec.exe");
+
+                if(bytes is null)
+                    Logger.Log("Decode exe is null");
+                else
+                    await File.WriteAllBytesAsync(Constants.BlinkaExe, bytes);
+            }
+
+            var binkadecProcess = Process.Start(new ProcessStartInfo
+            {
+                FileName = Constants.BlinkaExe,
+                Arguments = $"-i \"{path}\" -o \"{path.Replace("blinka", "wav")}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true
+            });
+            binkadecProcess?.WaitForExit(5000);
         }
 
         private static async Task<USoundNodeRandom> TryGetSoundRandom(UEmoteMusic uEmoteMusic)

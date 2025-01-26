@@ -11,6 +11,8 @@ namespace AnimationExport.Utils
         public static readonly string BasePath = Directory.GetCurrentDirectory();
 
         public static readonly string DataPath = $"{BasePath}\\.data";
+        public static readonly string BlinkaExe = $"{DataPath}\\binkadec.exe";
+
         public static readonly string ExportPath = $"{BasePath}\\Export";
     }
 }
