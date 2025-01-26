@@ -33,6 +33,9 @@ using CUE4Parse.UE4.Assets.Exports.Material;
 using FFMpegCore;
 using FFMpegCore.Pipes;
 using CUE4Parse.UE4.Assets.Exports.Rig;
+using CUE4Parse.Compression;
+using CUE4Parse.UE4.Assets.Objects;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace AnimationExport.Utils
 {
@@ -44,9 +47,10 @@ namespace AnimationExport.Utils
         {
             try
             {
+                
                 var aes = JsonConvert.DeserializeObject<FortniteAPIResponse<AES>>(await new HttpClient().GetStringAsync("https://fortnite-api.com/v2/aes")).Data;
 
-                Provider = new DefaultFileProvider(FortniteUtils.PaksPath, SearchOption.TopDirectoryOnly, false, new VersionContainer(EGame.GAME_UE5_3));
+                Provider = new DefaultFileProvider(FortniteUtils.PaksPath, SearchOption.AllDirectories, false, new VersionContainer(EGame.GAME_UE5_5));
                 Provider.Initialize();
 
                 var keys = new List<KeyValuePair<FGuid, FAesKey>>
@@ -57,6 +61,18 @@ namespace AnimationExport.Utils
                 keys.AddRange(aes.DynamicKeys.Select(x => new KeyValuePair<FGuid, FAesKey>(new Guid(x.PakGuid), new FAesKey(x.Key))));
                 await Provider.SubmitKeysAsync(keys);
                 Logger.Log($"File provider initalized with {Provider.Keys.Count} keys", LogLevel.Cue4);
+
+                var oodlePath = Path.Combine(Constants.DataPath, OodleHelper.OODLE_DLL_NAME);
+                if (File.Exists(OodleHelper.OODLE_DLL_NAME))
+                {
+                    File.Move(OodleHelper.OODLE_DLL_NAME, oodlePath, true);
+                }
+                else if (!File.Exists(oodlePath))
+                {
+                    await OodleHelper.DownloadOodleDllAsync(oodlePath);
+                }
+
+                OodleHelper.Initialize(oodlePath);
 
                 var mappings = await Mappings();
 
@@ -95,9 +111,12 @@ namespace AnimationExport.Utils
 
             #region Ready
             UObject eidObj;
+
+            eidObj = await Provider.LoadObjectAsync($"FortniteGame/Plugins/GameFeatures/BRCosmetics/Content/Athena/Items/Cosmetics/Dances/{EID}");
+
             try
             {
-                eidObj = await Provider.LoadObjectAsync($"FortniteGame/Plugins/GameFeatures/BRCosmetics/Content/Athena/Items/Cosmetics/Dances/{EID}");
+                eidObj = await Provider.LoadObjectAsync($"FortniteGame/Plugins/GameFeatures/BRCosmetics/Content/Athena/Items/Cosmetics/Dances/{EID}"); //FortniteGame/Plugins/GameFeatures/BRCosmetics/Content/Athena/Items/Cosmetics/Dances/EID_BerryTart.uasset
             }
             catch(Exception ex)
             {
@@ -112,6 +131,12 @@ namespace AnimationExport.Utils
                 }
             }
 
+            if(eidObj is null)
+            {
+                Logger.Log("Failed Getting object", LogLevel.Error);
+                return;
+            }
+
             if(!eidObj.TryGetValue(out UObject CMM_Montage, "Animation"))
             {
                 Logger.Log("Error Getting Animation", LogLevel.Error);
@@ -124,10 +149,10 @@ namespace AnimationExport.Utils
                 return;
             }
 
-            if (!eidObj.TryGetValue(out FText displayName, "DisplayName"))
+            if (!eidObj.TryGetValue(out FText displayName, "ItemName"))
                 Logger.Log("Error Getting DisplayName", LogLevel.Error);
 
-            if (!eidObj.TryGetValue(out FText description, "Description"))
+            if (!eidObj.TryGetValue(out FText description, "ItemDescription"))
                 Logger.Log("Error Getting Description", LogLevel.Error);
 
             if(eidObj.TryGetValue(out bool bMovingEmote, "bMovingEmote"))
@@ -147,13 +172,21 @@ namespace AnimationExport.Utils
             #endregion
 
             #region Stop
-            Logger.Log("Exporting Male Animations", LogLevel.Cue4);
+            Logger.Log($"Exporting Male Animations {CMM_Montage.Name}", LogLevel.Cue4);
             var CMMObject = await Provider.LoadObjectAsync(CMM_Montage.GetPathName());
-            await ExportAnimations(CMMObject);
 
-            Logger.Log("Exporting Female Animations", LogLevel.Cue4);
+            if (CMMObject.TryGetValue(out FSlotAnimationTrack[] slotAnimTracks, "SlotAnimTracks"))
+            {
+                await ExportAnimations(CMMObject, EGender.Male, slotAnimTracks);
+            }
+
+            Logger.Log($"Exporting Female Animations {CMF_Montage.Name}", LogLevel.Cue4);
             var CMFObject = await Provider.LoadObjectAsync(CMF_Montage.GetPathName());
-            await ExportAnimations(CMFObject, EGender.Female);
+
+            if (CMFObject.TryGetValue(out FSlotAnimationTrack[] slotAnimTracksF, "SlotAnimTracks"))
+            {
+                await ExportAnimations(CMFObject, EGender.Female, slotAnimTracksF);
+            }
 
             Directory.CreateDirectory(MiscPath());
 
@@ -168,62 +201,62 @@ namespace AnimationExport.Utils
             #endregion
         }
 
-        private static async Task ExportAnimations(UObject uObject, EGender gender = EGender.Male)
+        private static async Task ExportAnimations(UObject uObject, EGender gender = EGender.Male, FSlotAnimationTrack[] slotAnimTracks = null)
         {
             bool isAdictive = false;
 
-            if (uObject.TryGetValue(out FSlotAnimationTrack[] slotAnimTracks, "SlotAnimTracks"))
+            if (gender is EGender.Female)
+                isAdictive = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText == "AdditiveCorrective") is null ? false : true;
+
+            exportDataJson.IsAddictive = isAdictive;
+
+            var currentSlotName = isAdictive ? "FullBody" : "AdditiveCorrective";
+
+            var fullBodyAnimTrack = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText == "FullBody");
+
+            if (fullBodyAnimTrack is null)
             {
-                if(gender is EGender.Female)
-                    isAdictive = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText == "AdditiveCorrective") is null ? false : true;
+                Logger.Log($"Cant find FullBody", LogLevel.Error);
+                return;
+            }
 
-                exportDataJson.IsAddictive = isAdictive;
+            var animReference = await fullBodyAnimTrack.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
 
-                var currentSlotName = isAdictive ? "FullBody" : "AdditiveCorrective";
-
-                var fullBodyAnimTrack = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText == "FullBody");
-                
-                if (fullBodyAnimTrack is null)
-                {
-                    Logger.Log($"Cant find FullBody", LogLevel.Error);
-                    return;
-                }
-
-                var animReference = await fullBodyAnimTrack.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
-
-                if (isAdictive)
-                {
-                    var additiveCorrectiveAnimTrack = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText == "AdditiveCorrective");
-                    var additiveCorrectiveanimReference = await additiveCorrectiveAnimTrack.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
-                    var refUAnimSequence = await Provider.LoadObjectAsync<UAnimSequence>(animReference.GetPathName());
-                    var addUAnimSequence = await Provider.LoadObjectAsync<UAnimSequence>(additiveCorrectiveanimReference.GetPathName());
-                    addUAnimSequence.RefPoseSeq = new ResolvedLoadedObject(refUAnimSequence);
-                    await ExportAnimations(addUAnimSequence);
-                }
-                else
-                {
-                    var animSequence = await Provider.LoadObjectAsync<UAnimSequence>(animReference.GetPathName());
-                    await ExportAnimations(animSequence);
-                }
-                
-                if(exportDataJson.IsMovingEmote)
-                {
-                    var bodyMotion = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText is "FullBodyInMotion");
-                    if(bodyMotion != null)
-                    {
-                        var animReferenceMot = await bodyMotion.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
-                        var animSequence = await Provider.LoadObjectAsync<UAnimSequence>(animReferenceMot.GetPathName());
-                        await ExportAnimations(animSequence);
-                    }
-                }
+            if (isAdictive)
+            {
+                var additiveCorrectiveAnimTrack = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText == "AdditiveCorrective");
+                var additiveCorrectiveanimReference = await additiveCorrectiveAnimTrack.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
+                var refUAnimSequence = await Provider.LoadObjectAsync<UAnimSequence>(animReference.GetPathName());
+                var addUAnimSequence = await Provider.LoadObjectAsync<UAnimSequence>(additiveCorrectiveanimReference.GetPathName());
+                addUAnimSequence.RefPoseSeq = new ResolvedLoadedObject(refUAnimSequence);
+                await ExportAnimation(addUAnimSequence);
             }
             else
-                Logger.Log("Error Getting FSlotAnimationTrack", LogLevel.Error);
+            {
+                var refUAnimSequence = await Provider.LoadObjectAsync<UAnimSequence>(animReference.GetPathName());
+                await ExportAnimation(refUAnimSequence);
+            }
+
+            if (exportDataJson.IsMovingEmote)
+            {
+                var bodyMotion = slotAnimTracks.FirstOrDefault(x => x.SlotName.PlainText is "FullBodyInMotion");
+                if (bodyMotion != null)
+                {
+                    var animReferenceMot = await bodyMotion.AnimTrack.AnimSegments[0].AnimReference.LoadAsync();
+                    var animSequence = await Provider.LoadObjectAsync<UAnimSequence>(animReferenceMot.GetPathName());
+                    await ExportAnimation(animSequence);
+                }
+            }
         }
 
-        private static async Task ExportAnimations(UAnimSequence animSequence)
+        private static async Task ExportAnimation(UAnimSequence animSequence)
         {
-            var animExporter = new AnimExporter(animSequence, new ExporterOptions());
+            var exporterOptions = new ExporterOptions()
+            {
+                AnimFormat = EAnimFormat.ActorX
+            };
+
+            var animExporter = new AnimExporter(animSequence, exporterOptions);
             animExporter.TryWriteToDir(new DirectoryInfo(Constants.ExportPath), out var label, out var fileName);
 
             Logger.Log($"Exported {Path.GetFileNameWithoutExtension(fileName)}", LogLevel.Cue4);
@@ -242,17 +275,26 @@ namespace AnimationExport.Utils
         {
             Logger.Log("Exporting Icons", LogLevel.Cue4);
 
-            if (!uObject.TryGetValue(out UTexture2D iconSmall, "SmallPreviewImage"))
-                Logger.Log("Cant find SmallPreviewImage");
-
             Directory.CreateDirectory(IconsPath());
 
-            await File.WriteAllBytesAsync(IconsPath() + $"\\{iconSmall.Name}.png", iconSmall.Decode()!.Encode(SKEncodedImageFormat.Png, 256).ToArray());
+            if (uObject.TryGetValue(out FInstancedStruct[] dataList, "DataList"))
+            {
+                foreach(var f in dataList)
+                {
+                    if(f.NonConstStruct!.TryGetValue(out UTexture2D iconSmall, "Icon"))
+                    {
+                        await File.WriteAllBytesAsync(IconsPath() + $"\\{iconSmall.Name}.png", iconSmall.Decode()!.Encode(SKEncodedImageFormat.Png, 256).ToArray());
+                        continue;
+                    }
 
-            if(!uObject.TryGetValue(out UTexture2D largeSmall, "LargePreviewImage"))
-                Logger.Log("Cant find SmallPreviewImage");
+                    if (f.NonConstStruct!.TryGetValue(out UTexture2D largeSmall, "LargeIcon"))
+                    {
+                        await File.WriteAllBytesAsync(IconsPath() + $"\\{largeSmall.Name}.png", largeSmall.Decode()!.Encode(SKEncodedImageFormat.Png, 512).ToArray());
+                        continue;
+                    }
+                }
+            }
 
-            await File.WriteAllBytesAsync(IconsPath() + $"\\{largeSmall.Name}.png", largeSmall.Decode()!.Encode(SKEncodedImageFormat.Png, 512).ToArray());
             Logger.Log("Exported Icons", LogLevel.Cue4);
         }
 
